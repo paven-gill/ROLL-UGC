@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard, Users, DollarSign, Zap,
-  RefreshCw, Plus, Instagram,
+  RefreshCw, Plus, Instagram, Music2,
   Eye, FileVideo, TrendingUp, ChevronRight, ChevronDown, CalendarDays,
   ArrowUpDown, Pencil, Heart, MessageCircle, CheckCircle2, Clock,
   type LucideIcon,
@@ -545,6 +545,8 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const filteredCreators  = selectedCreatorId ? creators.filter(c => c.id === selectedCreatorId) : creators;
 
   const totalViews  = filteredSummaries.reduce((s, x) => s + x.total_views, 0);
+  const igTotal     = filteredSummaries.reduce((s, x) => s + x.ig_views, 0);
+  const ttTotal     = filteredSummaries.reduce((s, x) => s + x.tt_views, 0);
   const totalPayout = filteredSummaries.reduce((s, x) => s + x.payout, 0);
   const cpm = totalViews > 0 ? (totalPayout / totalViews) * 1000 : 0;
 
@@ -611,7 +613,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
 
       {/* 4 stat cards */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 transition-opacity ${statsLoading ? "opacity-50" : ""}`}>
-        <Stat label="Total Views"  value={fmt(totalViews)}       Icon={Eye}       sub={rangeApprox ? "approx · sync daily for accuracy" : periodLabel} />
+        <Stat label="Total Views"  value={fmt(totalViews)}       Icon={Eye}       sub={rangeApprox ? "approx · sync daily for accuracy" : (ttTotal > 0 ? `IG ${fmt(igTotal)} · TT ${fmt(ttTotal)}` : periodLabel)} />
         <Stat label="Total Payouts" value={fmtMoney(totalPayout)} Icon={DollarSign} accent />
         <Stat label="CPM"          value={`$${cpm.toFixed(2)}`}  Icon={TrendingUp} sub="Cost per 1K views" />
         <Stat label="Total Posts"  value={String(totalPosts)}    Icon={FileVideo} />
@@ -698,6 +700,11 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
                     {creator.instagram_username && (
                       <span className="text-blue-400/60 text-xs flex items-center gap-1">
                         <Instagram size={10}/> @{creator.instagram_username}
+                      </span>
+                    )}
+                    {creator.tiktok_username && (
+                      <span className="text-pink-400/60 text-xs flex items-center gap-1">
+                        <Music2 size={10}/> @{creator.tiktok_username}
                       </span>
                     )}
                     <span className="text-xs text-gray-600 ml-auto">Top 4 · {periodLabel}</span>
@@ -822,6 +829,11 @@ function CreatorsTab({
                       {creator.instagram_username && (
                         <div className="text-blue-400/60 text-xs flex items-center gap-0.5 mt-0.5">
                           <Instagram size={9}/> @{creator.instagram_username}
+                        </div>
+                      )}
+                      {creator.tiktok_username && (
+                        <div className="text-pink-400/60 text-xs flex items-center gap-0.5 mt-0.5">
+                          <Music2 size={9}/> @{creator.tiktok_username}
                         </div>
                       )}
                     </td>

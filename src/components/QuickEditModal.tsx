@@ -14,6 +14,7 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
   const [form, setForm] = useState({
     name: creator.name,
     instagram_username: creator.instagram_username || "",
+    tiktok_username: creator.tiktok_username || "",
     base_fee: String(creator.base_fee),
     rate_per_thousand_views: String(creator.rate_per_thousand_views),
     affiliate_percentage: String(creator.affiliate_percentage ?? 0),
@@ -34,6 +35,7 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
       body: JSON.stringify({
         name: form.name.trim() || creator.name,
         instagram_username: form.instagram_username.trim().replace("@", "") || null,
+        tiktok_username: form.tiktok_username.trim().replace("@", "") || null,
         base_fee: parseFloat(form.base_fee) || 0,
         rate_per_thousand_views: parseFloat(form.rate_per_thousand_views) || 2,
         affiliate_percentage: parseFloat(form.affiliate_percentage) || 0,
@@ -75,6 +77,12 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
               label="Instagram Username"
               value={form.instagram_username}
               onChange={v => setForm(f => ({ ...f, instagram_username: v }))}
+              placeholder="@username"
+            />
+            <Field
+              label="TikTok Username"
+              value={form.tiktok_username}
+              onChange={v => setForm(f => ({ ...f, tiktok_username: v }))}
               placeholder="@username"
             />
           </div>

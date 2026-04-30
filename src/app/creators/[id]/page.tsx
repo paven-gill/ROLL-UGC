@@ -213,7 +213,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const [paymentForm, setPaymentForm] = useState({
     base_fee: "", rate_per_thousand_views: "", affiliate_percentage: "",
   });
-  const [socialsForm, setSocialsForm] = useState({ instagram_username: "" });
+  const [socialsForm, setSocialsForm] = useState({ instagram_username: "", tiktok_username: "" });
   const [programForm, setProgramForm] = useState({
     name: "", monthly_target: "", joined_at: "",
   });
@@ -238,7 +238,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
       rate_per_thousand_views: String(data.rate_per_thousand_views),
       affiliate_percentage: String(data.affiliate_percentage ?? 0),
     });
-    setSocialsForm({ instagram_username: data.instagram_username || "" });
+    setSocialsForm({ instagram_username: data.instagram_username || "", tiktok_username: data.tiktok_username || "" });
     setProgramForm({
       name: data.name,
       monthly_target: String(data.monthly_target ?? 30),
@@ -271,6 +271,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   async function saveSocials() {
     await patch({
       instagram_username: socialsForm.instagram_username.trim().replace("@", "") || null,
+      tiktok_username: socialsForm.tiktok_username.trim().replace("@", "") || null,
     });
   }
 
@@ -300,13 +301,17 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
       const res = await fetch(`/api/sync/${params.id}`, { method: "POST" });
       const data = await res.json();
       await fetchCreator();
-      if (data.instagram_error) {
+      if (data.instagram_error && data.tiktok_error) {
         setSyncMsg(`Error: ${data.instagram_error}`);
       } else if (data.cycle_error) {
         setSyncMsg(`Posts synced, but cycle error: ${data.cycle_error}`);
       } else {
-        const igViews = data.instagram?.posts?.length ?? 0;
-        setSyncMsg(`Synced ${igViews} posts · cycle: ${data.cycle?.action ?? "unknown"}`);
+        const parts: string[] = [];
+        if (data.instagram) parts.push(`IG ${fmt(data.instagram.cumulative_views ?? 0)} views`);
+        if (data.tiktok)    parts.push(`TT ${fmt(data.tiktok.cumulative_views ?? 0)} views`);
+        if (data.instagram_error) parts.push(`IG error`);
+        if (data.tiktok_error)    parts.push(`TT error`);
+        setSyncMsg(`${parts.join(" · ")} · cycle: ${data.cycle?.action ?? "unknown"}`);
       }
     } catch (e) {
       setSyncMsg(`Failed: ${String(e)}`);
@@ -471,21 +476,43 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
             saving={saving}
           >
             {editSection === "socials" ? (
-              <Field
-                label="Instagram Username"
-                value={socialsForm.instagram_username}
-                onChange={v => setSocialsForm(f => ({ ...f, instagram_username: v }))}
-                placeholder="@username"
-              />
-            ) : creator.instagram_username ? (
-              <InfoRow label="Instagram" value={`@${creator.instagram_username}`} />
+              <div className="space-y-3">
+                <Field
+                  label="Instagram Username"
+                  value={socialsForm.instagram_username}
+                  onChange={v => setSocialsForm(f => ({ ...f, instagram_username: v }))}
+                  placeholder="@username"
+                />
+                <Field
+                  label="TikTok Username"
+                  value={socialsForm.tiktok_username}
+                  onChange={v => setSocialsForm(f => ({ ...f, tiktok_username: v }))}
+                  placeholder="@username"
+                />
+              </div>
             ) : (
-              <button
-                onClick={() => setEditSection("socials")}
-                className="text-sm text-gray-600 hover:text-emerald-400 transition-colors"
-              >
-                + Connect Instagram
-              </button>
+              <div className="space-y-2">
+                {creator.instagram_username ? (
+                  <InfoRow label="Instagram" value={`@${creator.instagram_username}`} />
+                ) : (
+                  <button
+                    onClick={() => setEditSection("socials")}
+                    className="text-sm text-gray-600 hover:text-emerald-400 transition-colors"
+                  >
+                    + Connect Instagram
+                  </button>
+                )}
+                {creator.tiktok_username ? (
+                  <InfoRow label="TikTok" value={`@${creator.tiktok_username}`} />
+                ) : (
+                  <button
+                    onClick={() => setEditSection("socials")}
+                    className="text-sm text-gray-600 hover:text-emerald-400 transition-colors"
+                  >
+                    + Connect TikTok
+                  </button>
+                )}
+              </div>
             )}
           </SectionCard>
         </div>

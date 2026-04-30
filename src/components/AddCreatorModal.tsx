@@ -14,6 +14,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
   const [form, setForm] = useState({
     name: "",
     instagram_username: "",
+    tiktok_username: "",
     base_fee: "",
     rate_per_thousand_views: "2",
     affiliate_percentage: "0",
@@ -35,7 +36,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
       body: JSON.stringify({
         name: form.name.trim(),
         instagram_username: form.instagram_username.trim().replace("@", "") || null,
-        tiktok_username: null,
+        tiktok_username: form.tiktok_username.trim().replace("@", "") || null,
         base_fee: parseFloat(form.base_fee) || 0,
         rate_per_thousand_views: parseFloat(form.rate_per_thousand_views) || 2,
         affiliate_percentage: parseFloat(form.affiliate_percentage) || 0,
@@ -80,6 +81,12 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
               label="Instagram Username"
               value={form.instagram_username}
               onChange={(v) => setForm({ ...form, instagram_username: v })}
+              placeholder="@username"
+            />
+            <Field
+              label="TikTok Username"
+              value={form.tiktok_username}
+              onChange={(v) => setForm({ ...form, tiktok_username: v })}
               placeholder="@username"
             />
           </div>
