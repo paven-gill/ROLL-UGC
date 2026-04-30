@@ -3,14 +3,17 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0d0d0d;
-  --card: #1a1a1a;
-  --border: #2a2a2a;
+  --bg: #07070e;
 }
 
 body {
   background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 110% 60% at 50% -5%, rgba(52, 211, 153, 0.32) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 35% at 5%  35%, rgba(52, 211, 153, 0.09) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 95% 85%, rgba(14,  30,  70, 0.45) 0%, transparent 55%);
   color: white;
+  min-height: 100vh;
 }
 
 * {
@@ -18,13 +21,16 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--card);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #444;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
 }

@@ -104,7 +104,7 @@ function StatCard({
   color?: "green" | "yellow";
 }) {
   return (
-    <div className="bg-[#111] border border-[#1a1a1a] rounded-xl p-5">
+    <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
         <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{label}</p>
         <Icon size={14} className="text-gray-600"/>
@@ -137,8 +137,8 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-[#111] border border-[#1a1a1a] rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#1a1a1a]">
+    <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.1]">
         <h2 className="text-sm font-semibold text-gray-200">{title}</h2>
         {editing ? (
           <div className="flex items-center gap-3">
@@ -169,7 +169,7 @@ function SectionCard({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-[#1a1a1a] last:border-0">
+    <div className="flex items-center justify-between py-2 border-b border-white/[0.1] last:border-0">
       <span className="text-gray-500 text-sm">{label}</span>
       <span className="text-white text-sm font-medium">{value}</span>
     </div>
@@ -191,7 +191,7 @@ function Field({
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-emerald-500 transition-colors"
+        className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-emerald-500/60 focus:bg-white/[0.06] focus:shadow-[0_0_0_3px_rgba(52,211,153,0.08)] transition-all"
       />
     </div>
   );
@@ -322,7 +322,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
   if (!creator) {
     return (
-      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center text-gray-600 text-sm">
+      <div className="min-h-screen flex items-center justify-center text-gray-600 text-sm">
         Loading...
       </div>
     );
@@ -332,9 +332,9 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const monthly_target = creator.monthly_target ?? 30;
 
   return (
-    <div className="min-h-screen bg-[#0d0d0d] text-white">
+    <div className="min-h-screen text-white">
       {/* ── Header ── */}
-      <div className="border-b border-[#1a1a1a] bg-[#080808] px-6 py-4">
+      <div className="border-b border-white/[0.08] bg-[#07070e]/70 backdrop-blur-2xl px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           {/* Left */}
           <div className="flex items-center gap-4">
@@ -390,7 +390,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
             <button
               onClick={sync}
               disabled={syncing}
-              className="flex items-center gap-1.5 bg-[#111] border border-[#1a1a1a] hover:border-[#333] text-white px-3 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-white/[0.04] border border-white/[0.08] hover:border-white/[0.18] text-white px-3 py-1.5 rounded-lg text-sm transition-all disabled:opacity-50"
             >
               <RefreshCw size={13} className={syncing ? "animate-spin" : ""}/>
               {syncing ? "Syncing..." : "Sync"}
@@ -572,7 +572,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                 const projectedPayout = creator.base_fee + (ac.views_earned / 1000) * creator.rate_per_thousand_views;
                 return (
                   <>
-                    <div className="border-t border-[#1a1a1a] pt-4">
+                    <div className="border-t border-white/[0.07] pt-4">
                       <div className="grid grid-cols-4 gap-6 mb-4">
                         <div>
                           <p className="text-gray-500 text-xs mb-1">Onboarding Sync</p>
@@ -595,24 +595,24 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                         </div>
                       </div>
                       <div className="grid grid-cols-4 gap-4">
-                        <div className="bg-[#0d0d0d] rounded-lg p-3">
+                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
                           <p className="text-gray-500 text-xs mb-1">Posts This Cycle</p>
                           <p className="text-white text-sm font-semibold">
                             <span className={ac.post_count >= monthly_target ? "text-emerald-400" : ""}>{ac.post_count}</span>
                             <span className="text-gray-600 font-normal">/{monthly_target}</span>
                           </p>
                         </div>
-                        <div className="bg-[#0d0d0d] rounded-lg p-3">
+                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
                           <p className="text-gray-500 text-xs mb-1">Views Earned</p>
                           <p className="text-white text-sm font-semibold">{fmt(ac.views_earned)}</p>
                         </div>
-                        <div className="bg-[#0d0d0d] rounded-lg p-3">
+                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
                           <p className="text-gray-500 text-xs mb-1">View Bonus</p>
                           <p className="text-white text-sm font-semibold">
                             ${((ac.views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2)}
                           </p>
                         </div>
-                        <div className="bg-[#0d0d0d] rounded-lg p-3">
+                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
                           <p className="text-gray-500 text-xs mb-1">Projected Payout</p>
                           <p className="text-emerald-400 text-sm font-semibold">${projectedPayout.toFixed(2)}</p>
                         </div>
@@ -626,8 +626,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
         </SectionCard>
 
         {/* Cycle History */}
-        <div className="bg-[#111] border border-[#1a1a1a] rounded-xl overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-[#1a1a1a]">
+        <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-white/[0.1]">
             <h2 className="text-sm font-semibold text-gray-200">Cycle History</h2>
           </div>
           {!cycleData || cycleData.cycleHistory.length === 0 ? (
@@ -635,7 +635,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-gray-500 text-xs border-b border-[#1a1a1a]">
+                <tr className="text-gray-500 text-xs border-b border-white/[0.1]">
                   <th className="text-left px-5 py-3">Cycle</th>
                   <th className="text-right px-4 py-3">Views Earned</th>
                   <th className="text-right px-4 py-3">Posts</th>
@@ -645,7 +645,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
               </thead>
               <tbody>
                 {cycleData.cycleHistory.map(c => (
-                  <tr key={c.id} className="border-b border-[#161616] hover:bg-[#161616]">
+                  <tr key={c.id} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                     <td className="px-5 py-3 font-medium text-gray-300">
                       {fmtShortDate(c.cycle_start_date)} → {fmtShortDate(c.cycle_end_date)}
                     </td>
@@ -680,15 +680,15 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
         {/* Individual Posts */}
         {posts.length > 0 && (
-          <div className="bg-[#111] border border-[#1a1a1a] rounded-xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-[#1a1a1a]">
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-white/[0.1]">
               <h2 className="text-sm font-semibold text-gray-200">
                 Recent Posts <span className="text-gray-600 font-normal">(last 10)</span>
               </h2>
             </div>
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-gray-500 text-xs border-b border-[#1a1a1a]">
+                <tr className="text-gray-500 text-xs border-b border-white/[0.1]">
                   <th className="text-left px-5 py-3">Post</th>
                   <th className="text-left px-4 py-3">Type</th>
                   <th className="text-right px-4 py-3">Views</th>
@@ -698,10 +698,10 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
               </thead>
               <tbody>
                 {posts.slice(0, 10).map(p => (
-                  <tr key={`${p.post_id}-${p.platform}`} className="border-b border-[#161616] hover:bg-[#161616]">
+                  <tr key={`${p.post_id}-${p.platform}`} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                     <td className="px-5 py-2">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-[#1a1a1a] shrink-0">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-white/[0.05] shrink-0">
                           {p.thumbnail_url ? (
                             <img
                               src={`/api/proxy-image?url=${encodeURIComponent(p.thumbnail_url)}`}

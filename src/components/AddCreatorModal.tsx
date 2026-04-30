@@ -58,8 +58,8 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#111] border border-[#1e1e1e] rounded-2xl w-full max-w-md p-6">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[#0d0d15]/85 backdrop-blur-3xl border border-white/[0.14] rounded-2xl w-full max-w-md p-6 shadow-[0_24px_80px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.16)]">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-base font-semibold text-white">Add Creator</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
@@ -70,7 +70,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {/* Identity */}
           <div className="space-y-3">
-            <p className="text-[11px] text-gray-600 uppercase tracking-wider font-medium">Identity</p>
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Identity</p>
             <Field
               label="Full Name *"
               value={form.name}
@@ -93,7 +93,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
 
           {/* Payment */}
           <div className="space-y-3">
-            <p className="text-[11px] text-gray-600 uppercase tracking-wider font-medium">Payment Terms</p>
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Payment Terms</p>
             <div className="grid grid-cols-2 gap-3">
               <Field
                 label="Base Fee ($/month)"
@@ -121,7 +121,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
 
           {/* Program */}
           <div className="space-y-3">
-            <p className="text-[11px] text-gray-600 uppercase tracking-wider font-medium">Program</p>
+            <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Program</p>
             <div className="grid grid-cols-2 gap-3">
               <Field
                 label="Monthly Post Target"
@@ -144,7 +144,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
           <button
             type="submit"
             disabled={loading}
-            className="mt-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold py-2.5 rounded-lg transition-colors text-sm"
+            className="mt-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold py-2.5 rounded-lg transition-all text-sm shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.35)]"
           >
             {loading ? "Adding..." : "Add Creator"}
           </button>
@@ -171,7 +171,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-emerald-500 transition-colors"
+        className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-emerald-500/60 focus:bg-white/[0.06] focus:shadow-[0_0_0_3px_rgba(52,211,153,0.08)] transition-all"
       />
     </div>
   );

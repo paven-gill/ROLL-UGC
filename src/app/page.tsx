@@ -130,10 +130,10 @@ const NAV: NavItem[] = [
 
 function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   return (
-    <aside className="w-56 bg-[#080808] border-r border-[#1a1a1a] flex flex-col shrink-0 sticky top-0 h-screen">
-      <div className="px-5 py-5 border-b border-[#1a1a1a]">
+    <aside className="w-56 bg-[#07070e]/90 backdrop-blur-3xl border-r border-white/[0.1] flex flex-col shrink-0 sticky top-0 h-screen">
+      <div className="px-5 py-5 border-b border-white/[0.06]">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 bg-emerald-500 rounded-lg flex items-center justify-center">
+          <div className="w-7 h-7 bg-emerald-500 rounded-lg flex items-center justify-center shadow-[0_0_14px_rgba(52,211,153,0.5)]">
             <Zap size={13} className="text-black" />
           </div>
           <span className="font-semibold text-sm text-white">UGC Dashboard</span>
@@ -144,18 +144,18 @@ function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors text-left ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all text-left border ${
               active === id
-                ? "bg-[#1a1a1a] text-white"
-                : "text-gray-500 hover:text-gray-200 hover:bg-[#141414]"
+                ? "bg-emerald-500/[0.08] border-emerald-500/[0.18] text-white"
+                : "border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.04]"
             }`}
           >
-            <Icon size={15} className={active === id ? "text-emerald-400" : ""} />
+            <Icon size={15} className={active === id ? "text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.7)]" : ""} />
             {label}
           </button>
         ))}
       </nav>
-      <div className="px-5 py-4 border-t border-[#1a1a1a]">
+      <div className="px-5 py-4 border-t border-white/[0.06]">
         <p className="text-gray-700 text-xs">FutureCreator.biz</p>
       </div>
     </aside>
@@ -172,12 +172,12 @@ function Stat({
   accent?: boolean;
 }) {
   return (
-    <div className="bg-[#111] border border-[#1a1a1a] rounded-xl p-5">
+    <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-5 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
       <div className="flex items-center justify-between mb-3">
         <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{label}</p>
         {Icon && <Icon size={14} className="text-gray-600" />}
       </div>
-      <p className={`text-2xl font-bold ${accent ? "text-emerald-400" : "text-white"}`}>{value}</p>
+      <p className={`text-2xl font-bold ${accent ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.35)]" : "text-white"}`}>{value}</p>
       {sub && <p className="text-gray-600 text-xs mt-1">{sub}</p>}
     </div>
   );
@@ -225,7 +225,7 @@ function TimeRangePicker({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 bg-[#111] border border-[#1a1a1a] hover:border-[#333] rounded-lg px-3 py-2 text-sm text-gray-300 transition-colors"
+        className="flex items-center gap-2 bg-[#0d0d15]/80 border border-white/[0.14] hover:border-white/[0.28] rounded-lg px-3 py-2 text-sm text-gray-300 transition-all"
       >
         <CalendarDays size={13} className="text-gray-500" />
         <span>{label}</span>
@@ -233,7 +233,7 @@ function TimeRangePicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 bg-[#111] border border-[#1e1e1e] rounded-xl shadow-2xl z-50 w-48 overflow-hidden">
+        <div className="absolute right-0 top-full mt-1.5 bg-[#0b0b12]/95 backdrop-blur-2xl border border-white/[0.08] rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] z-50 w-48 overflow-hidden">
           {/* Range options */}
           {!monthOnly && (
             <div className="p-1">
@@ -243,8 +243,8 @@ function TimeRangePicker({
                   onClick={() => { onSelect(r.id); setOpen(false); }}
                   className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${
                     value === r.id
-                      ? "bg-[#1e1e1e] text-white"
-                      : "text-gray-400 hover:text-white hover:bg-[#1a1a1a]"
+                      ? "bg-white/[0.08] text-white"
+                      : "text-gray-400 hover:text-white hover:bg-white/[0.05]"
                   }`}
                 >
                   {r.label}
@@ -254,7 +254,7 @@ function TimeRangePicker({
           )}
 
           {/* Month list */}
-          <div className={monthOnly ? "p-1" : "border-t border-[#1e1e1e]"}>
+          <div className={monthOnly ? "p-1" : "border-t border-white/[0.06]"}>
             {!monthOnly && <p className="px-3 pt-2 pb-1 text-[10px] text-gray-600 uppercase tracking-wider">Specific Month</p>}
             <div className="max-h-44 overflow-y-auto pb-1 px-1">
               {months12.map(({ year: y, month: m }) => {
@@ -265,8 +265,8 @@ function TimeRangePicker({
                     onClick={() => { onSelect("month", y, m); setOpen(false); }}
                     className={`w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors ${
                       isActive
-                        ? "bg-[#1e1e1e] text-white"
-                        : "text-gray-400 hover:text-white hover:bg-[#1a1a1a]"
+                        ? "bg-white/[0.08] text-white"
+                        : "text-gray-400 hover:text-white hover:bg-white/[0.05]"
                     }`}
                   >
                     {MONTHS[m - 1]} {y}
@@ -309,32 +309,32 @@ function CreatorPicker({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 bg-[#111] border border-[#1a1a1a] hover:border-[#333] rounded-lg px-3 py-2 text-sm text-gray-300 transition-colors"
+        className="flex items-center gap-2 bg-[#0d0d15]/80 border border-white/[0.14] hover:border-white/[0.28] rounded-lg px-3 py-2 text-sm text-gray-300 transition-all"
       >
         <Users size={13} className="text-gray-500" />
         <span>{label}</span>
         <ChevronDown size={12} className={`text-gray-500 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 bg-[#111] border border-[#1e1e1e] rounded-xl shadow-2xl z-50 w-48 overflow-hidden">
+        <div className="absolute right-0 top-full mt-1.5 bg-[#0b0b12]/95 backdrop-blur-2xl border border-white/[0.08] rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] z-50 w-48 overflow-hidden">
           <div className="p-1">
             <button
               onClick={() => { onChange(null); setOpen(false); }}
               className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${
-                value === null ? "bg-[#1e1e1e] text-white" : "text-gray-400 hover:text-white hover:bg-[#1a1a1a]"
+                value === null ? "bg-white/[0.08] text-white" : "text-gray-400 hover:text-white hover:bg-white/[0.05]"
               }`}
             >
               All Creators
             </button>
           </div>
-          <div className="border-t border-[#1e1e1e]">
+          <div className="border-t border-white/[0.06]">
             <div className="max-h-60 overflow-y-auto p-1">
               {creators.map(c => (
                 <button
                   key={c.id}
                   onClick={() => { onChange(c.id); setOpen(false); }}
                   className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${
-                    value === c.id ? "bg-[#1e1e1e] text-white" : "text-gray-400 hover:text-white hover:bg-[#1a1a1a]"
+                    value === c.id ? "bg-white/[0.08] text-white" : "text-gray-400 hover:text-white hover:bg-white/[0.05]"
                   }`}
                 >
                   {c.name}
@@ -363,9 +363,9 @@ function PostGrid({ posts }: { posts: PostRow[] }) {
             href={igUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="group bg-[#111] border border-[#1a1a1a] hover:border-[#2a2a2a] rounded-xl overflow-hidden transition-colors block"
+            className="group bg-[#0d0d15]/75 backdrop-blur-sm border border-white/[0.12] hover:border-white/[0.24] hover:bg-[#0d0d15]/90 rounded-xl overflow-hidden transition-all block hover:shadow-[0_4px_24px_rgba(0,0,0,0.5)]"
           >
-            <div className="relative w-full aspect-[4/5] bg-[#1a1a1a]">
+            <div className="relative w-full aspect-[4/5] bg-[#0d0d15]">
               {p.thumbnail_url ? (
                 <img
                   src={`/api/proxy-image?url=${encodeURIComponent(p.thumbnail_url)}`}
@@ -431,6 +431,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const [allCreatorPosts, setAllCreatorPosts] = useState<Map<string, PostRow[]>>(new Map());
   const [postsLoading, setPostsLoading] = useState(false);
   const [chartData, setChartData] = useState<{ name: string; Views: number }[]>([]);
+  const [platformFilter, setPlatformFilter] = useState<"all" | "instagram" | "tiktok">("all");
 
   // Chart: daily deltas for rolling/month ranges; 12-month aggregates for all-time
   useEffect(() => {
@@ -548,6 +549,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const igTotal     = filteredSummaries.reduce((s, x) => s + x.ig_views, 0);
   const ttTotal     = filteredSummaries.reduce((s, x) => s + x.tt_views, 0);
   const totalPayout = filteredSummaries.reduce((s, x) => s + x.payout, 0);
+  const displayViews = platformFilter === "instagram" ? igTotal : platformFilter === "tiktok" ? ttTotal : totalViews;
   const cpm = totalViews > 0 ? (totalPayout / totalViews) * 1000 : 0;
 
   function filterPostsByRange(posts: PostRow[]): PostRow[] {
@@ -571,13 +573,19 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
     });
   }
 
-  const displayCreatorPosts = filterPostsByRange(creatorPosts).slice(0, 8);
+  function filterPostsByRangeAndPlatform(posts: PostRow[]): PostRow[] {
+    const filtered = filterPostsByRange(posts);
+    if (platformFilter === "all") return filtered;
+    return filtered.filter(p => p.platform === platformFilter);
+  }
+
+  const displayCreatorPosts = filterPostsByRangeAndPlatform(creatorPosts).slice(0, 8);
 
   // Total Posts: counted from post_snapshots filtered by taken_at — accurate regardless of sync frequency
   const activeCreators = filteredCreators.filter(c => c.active);
   const totalPosts = selectedCreatorId
-    ? filterPostsByRange(creatorPosts).length
-    : activeCreators.reduce((sum, c) => sum + filterPostsByRange(allCreatorPosts.get(c.id) ?? []).length, 0);
+    ? filterPostsByRangeAndPlatform(creatorPosts).length
+    : activeCreators.reduce((sum, c) => sum + filterPostsByRangeAndPlatform(allCreatorPosts.get(c.id) ?? []).length, 0);
 
   const periodLabel =
     rangeType === "all"   ? "all time" :
@@ -596,6 +604,28 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
            `${MONTHS[selMonth - 1]} ${selYear}`}
         </p>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPlatformFilter(p => p === "instagram" ? "all" : "instagram")}
+            title="Instagram only"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${
+              platformFilter === "instagram"
+                ? "bg-blue-500/15 text-blue-400 border-blue-500/30 shadow-[0_0_10px_rgba(96,165,250,0.12)]"
+                : "bg-white/[0.05] text-gray-600 border-white/[0.1] hover:text-gray-300 hover:border-white/[0.13] hover:bg-white/[0.05]"
+            }`}
+          >
+            <Instagram size={14}/>
+          </button>
+          <button
+            onClick={() => setPlatformFilter(p => p === "tiktok" ? "all" : "tiktok")}
+            title="TikTok only"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${
+              platformFilter === "tiktok"
+                ? "bg-pink-500/15 text-pink-400 border-pink-500/30 shadow-[0_0_10px_rgba(236,72,153,0.12)]"
+                : "bg-white/[0.05] text-gray-600 border-white/[0.1] hover:text-gray-300 hover:border-white/[0.13] hover:bg-white/[0.05]"
+            }`}
+          >
+            <Music2 size={14}/>
+          </button>
           <CreatorPicker
             creators={creators}
             value={selectedCreatorId}
@@ -613,14 +643,14 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
 
       {/* 4 stat cards */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 transition-opacity ${statsLoading ? "opacity-50" : ""}`}>
-        <Stat label="Total Views"  value={fmt(totalViews)}       Icon={Eye}       sub={rangeApprox ? "approx · sync daily for accuracy" : (ttTotal > 0 ? `IG ${fmt(igTotal)} · TT ${fmt(ttTotal)}` : periodLabel)} />
+        <Stat label={platformFilter === "instagram" ? "Instagram Views" : platformFilter === "tiktok" ? "TikTok Views" : "Total Views"} value={fmt(displayViews)} Icon={Eye} sub={rangeApprox ? "approx · sync daily for accuracy" : platformFilter !== "all" ? periodLabel : (ttTotal > 0 ? `IG ${fmt(igTotal)} · TT ${fmt(ttTotal)}` : periodLabel)} />
         <Stat label="Total Payouts" value={fmtMoney(totalPayout)} Icon={DollarSign} accent />
         <Stat label="CPM"          value={`$${cpm.toFixed(2)}`}  Icon={TrendingUp} sub="Cost per 1K views" />
         <Stat label="Total Posts"  value={String(totalPosts)}    Icon={FileVideo} />
       </div>
 
       {/* Views over time — full width */}
-      <div className="bg-[#111] border border-[#1a1a1a] rounded-xl p-5">
+      <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-5 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-sm font-semibold text-gray-200">Views Over Time</h2>
           <span className="text-xs text-gray-600">
@@ -638,7 +668,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
                 <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
             <XAxis
               dataKey="name"
               tick={{ fill: "#6b7280", fontSize: 11 }}
@@ -650,7 +680,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
               tickFormatter={v => fmt(v as number)}
             />
             <Tooltip
-              contentStyle={{ backgroundColor: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: "8px", fontSize: "12px" }}
+              contentStyle={{ backgroundColor: "rgba(10,10,18,0.95)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", fontSize: "12px" }}
               labelStyle={{ color: "#9ca3af" }}
               itemStyle={{ color: "#e5e7eb" }}
               formatter={(v: unknown) => [fmt(v as number), "Views Earned"]}
@@ -662,7 +692,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
 
       {/* Posts section */}
       {postsLoading ? (
-        <div className="bg-[#111] border border-[#1a1a1a] rounded-xl p-10 text-center text-gray-600 text-sm">Loading...</div>
+        <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">Loading...</div>
       ) : selectedCreatorId ? (
         /* ── Single creator: top 8 grid ── */
         <div>
@@ -674,7 +704,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
             <span className="text-xs text-gray-600">Top 8 · {periodLabel}</span>
           </div>
           {displayCreatorPosts.length === 0 ? (
-            <div className="bg-[#111] border border-[#1a1a1a] rounded-xl p-10 text-center text-gray-600 text-sm">
+            <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
               {creatorPosts.length === 0 ? "No posts synced yet" : `No posts in this period`}
             </div>
           ) : (
@@ -692,7 +722,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
             })
             .map(creator => {
               const allPosts = allCreatorPosts.get(creator.id) ?? [];
-              const posts = filterPostsByRange(allPosts).slice(0, 4);
+              const posts = filterPostsByRangeAndPlatform(allPosts).slice(0, 4);
               return (
                 <div key={creator.id}>
                   <div className="flex items-center gap-3 mb-3">
@@ -710,7 +740,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
                     <span className="text-xs text-gray-600 ml-auto">Top 4 · {periodLabel}</span>
                   </div>
                   {posts.length === 0 ? (
-                    <div className="bg-[#111] border border-[#1a1a1a] rounded-xl p-6 text-center text-gray-600 text-sm">
+                    <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
                       {allPosts.length === 0 ? "No posts synced yet" : "No posts in this period"}
                     </div>
                   ) : (
@@ -789,13 +819,13 @@ function CreatorsTab({
         <p className="text-sm text-gray-500">{creators.length} creators</p>
         <button
           onClick={onAdd}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
+          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)]"
         >
           <Plus size={14}/> Add Creator
         </button>
       </div>
 
-      <div className="bg-[#111] border border-[#1a1a1a] rounded-xl overflow-hidden">
+      <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
         {creators.length === 0 ? (
           <div className="py-16 text-center text-gray-600">
             No creators yet.{" "}
@@ -805,7 +835,7 @@ function CreatorsTab({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#1a1a1a]">
+                <tr className="border-b border-white/[0.07]">
                   <ColHeader col="name"      label="Creator" />
                   <th className="text-left px-4 py-3 text-xs text-gray-500">Deal</th>
                   <ColHeader col="posts"     label="All-Time Posts"  right />
@@ -821,7 +851,7 @@ function CreatorsTab({
                   <tr
                     key={creator.id}
                     onClick={() => onNavigate(creator.id)}
-                    className="border-b border-[#161616] hover:bg-[#161616] cursor-pointer transition-colors"
+                    className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer transition-colors"
                   >
                     {/* Creator */}
                     <td className="px-5 py-4">
@@ -964,7 +994,7 @@ function PayoutsTab() {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-600">Total Payout · {MONTHS[selMonth - 1]} {selYear}</p>
-          <p className="text-xl font-bold text-emerald-400">{fmtMoney(grandTotal)}</p>
+          <p className="text-xl font-bold text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]">{fmtMoney(grandTotal)}</p>
           {pendingTotal > 0 && (
             <p className="text-xs text-yellow-500 mt-0.5">{fmtMoney(pendingTotal)} pending</p>
           )}
@@ -979,7 +1009,7 @@ function PayoutsTab() {
       </div>
 
       {/* Table */}
-      <div className={`bg-[#111] border border-[#1a1a1a] rounded-xl overflow-hidden transition-opacity ${fetching ? "opacity-50" : ""}`}>
+      <div className={`bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] transition-opacity ${fetching ? "opacity-50" : ""}`}>
         {cycles.length === 0 && !fetching ? (
           <div className="py-16 text-center text-gray-600 text-sm">
             No cycles ending in {MONTHS[selMonth - 1]} {selYear}
@@ -988,7 +1018,7 @@ function PayoutsTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#1a1a1a]">
+                <tr className="border-b border-white/[0.07]">
                   <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-500">Cycle Period</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">Views Earned</th>
@@ -1001,7 +1031,7 @@ function PayoutsTab() {
               </thead>
               <tbody>
                 {cycles.map(cycle => (
-                  <tr key={cycle.id} className="border-b border-[#161616] hover:bg-[#161616]">
+                  <tr key={cycle.id} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                     {/* Creator */}
                     <td className="px-5 py-3.5">
                       <div className="font-medium text-white">{cycle.creator_name}</div>
@@ -1060,7 +1090,7 @@ function PayoutsTab() {
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t border-[#2a2a2a] bg-[#161616]">
+                <tr className="border-t border-white/[0.07] bg-white/[0.02]">
                   <td className="px-5 py-3.5 font-semibold text-gray-300" colSpan={2}>
                     {MONTHS[selMonth - 1]} {selYear} · Totals
                   </td>
@@ -1099,14 +1129,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/creators");
       const data = await res.json();
-      const list: Creator[] = Array.isArray(data) ? data : [];
-      const withMetrics = await Promise.all(
-        list.map(async (c) => {
-          const r = await fetch(`/api/creators/${c.id}`);
-          return r.json() as Promise<CreatorRow>;
-        })
-      );
-      setCreators(withMetrics);
+      setCreators(Array.isArray(data) ? data : []);
     } finally {
       setLoading(false);
     }
@@ -1122,12 +1145,12 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#0d0d0d] text-white">
+    <div className="flex min-h-screen text-white">
       <Sidebar active={activeTab} onChange={setActiveTab} />
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top header bar */}
-        <div className="border-b border-[#1a1a1a] px-6 py-3.5 flex items-center justify-between shrink-0 bg-[#0d0d0d]">
+        <div className="border-b border-white/[0.08] px-6 py-3.5 flex items-center justify-between shrink-0 bg-[#07070e]/70 backdrop-blur-2xl">
           <div>
             <h1 className="text-sm font-semibold text-white capitalize">{activeTab}</h1>
             <p className="text-gray-700 text-xs">{creators.filter(c => c.active).length} active creators</p>
