@@ -446,6 +446,8 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const [postsLoading, setPostsLoading] = useState(false);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [platformFilter, setPlatformFilter] = useState<"all" | "instagram" | "tiktok">("all");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Chart: daily deltas for rolling/month ranges; 12-month aggregates for all-time
   // For daily views, also fetch completed cycle end dates to overlay payout dot markers.
@@ -587,8 +589,11 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const igTotal     = filteredSummaries.reduce((s, x) => s + x.ig_views, 0);
   const ttTotal     = filteredSummaries.reduce((s, x) => s + x.tt_views, 0);
   const totalPayout = filteredSummaries.reduce((s, x) => s + x.payout, 0);
-  const displayViews = platformFilter === "instagram" ? igTotal : platformFilter === "tiktok" ? ttTotal : totalViews;
-  const cpm = totalViews > 0 ? (totalPayout / totalViews) * 1000 : 0;
+  const igPayout    = filteredSummaries.reduce((s, x) => s + (x.total_views > 0 ? x.payout * x.ig_views / x.total_views : 0), 0);
+  const ttPayout    = filteredSummaries.reduce((s, x) => s + (x.total_views > 0 ? x.payout * x.tt_views / x.total_views : 0), 0);
+  const displayViews  = platformFilter === "instagram" ? igTotal  : platformFilter === "tiktok" ? ttTotal  : totalViews;
+  const displayPayout = platformFilter === "instagram" ? igPayout : platformFilter === "tiktok" ? ttPayout : totalPayout;
+  const cpm = displayViews > 0 ? (displayPayout / displayViews) * 1000 : 0;
 
   function filterPostsByRange(posts: PostRow[]): PostRow[] {
     const now = new Date();
@@ -682,7 +687,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
       {/* 4 stat cards */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 transition-opacity ${statsLoading ? "opacity-50" : ""}`}>
         <Stat label={platformFilter === "instagram" ? "Instagram Views" : platformFilter === "tiktok" ? "TikTok Views" : "Total Views"} value={fmt(displayViews)} Icon={Eye} sub={rangeApprox ? "approx · sync daily for accuracy" : platformFilter !== "all" ? periodLabel : (ttTotal > 0 ? `IG ${fmt(igTotal)} · TT ${fmt(ttTotal)}` : periodLabel)} />
-        <Stat label="Total Payouts" value={fmtMoney(totalPayout)} Icon={DollarSign} accent />
+        <Stat label={platformFilter === "instagram" ? "Instagram Payouts" : platformFilter === "tiktok" ? "TikTok Payouts" : "Total Payouts"} value={fmtMoney(displayPayout)} Icon={DollarSign} accent />
         <Stat label="CPM"          value={`$${cpm.toFixed(2)}`}  Icon={TrendingUp} sub="Cost per 1K views" />
         <Stat label="Total Posts"  value={String(totalPosts)}    Icon={FileVideo} />
       </div>
@@ -698,7 +703,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
             {!selectedCreatorId ? " · all creators" : ""}
           </span>
         </div>
-        <ResponsiveContainer width="100%" height={240}>
+        {!mounted ? <div style={{ height: 240 }} /> : <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData} margin={{ top: 24, right: 5, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="gViews" x1="0" y1="0" x2="0" y2="1">
@@ -763,7 +768,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
               activeDot={{ r: 4, fill: "#34d399", strokeWidth: 0 }}
             />
           </AreaChart>
-        </ResponsiveContainer>
+        </ResponsiveContainer>}
       </div>
 
       {/* Posts section */}
