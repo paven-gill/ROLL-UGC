@@ -75,24 +75,10 @@ function fmtShortDate(dateStr: string | null): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function getAllTimeStats(creator: CreatorDetail) {
-  const joinDate = creator.joined_at ? new Date(creator.joined_at + "T00:00:00") : null;
-  let allViews = 0, allPosts = 0;
-  const monthViews = new Map<string, number>();
-  for (const m of creator.metrics) {
-    allViews += m.total_views;
-    allPosts += m.post_count;
-    const key = `${m.year}-${m.month}`;
-    monthViews.set(key, (monthViews.get(key) ?? 0) + m.total_views);
-  }
-  let totalPayout = 0;
-  monthViews.forEach((views, key) => {
-    const [y, mo] = key.split("-").map(Number);
-    const monthEnd = new Date(y, mo, 0);
-    const baseFee = !joinDate || joinDate <= monthEnd ? creator.base_fee : 0;
-    totalPayout += baseFee + (views / 1000) * creator.rate_per_thousand_views;
-  });
-  return { allViews, allPosts, totalPayout };
+function getAllTimePostCount(creator: CreatorDetail) {
+  let allPosts = 0;
+  for (const m of creator.metrics) allPosts += m.post_count;
+  return allPosts;
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -328,7 +314,13 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     );
   }
 
-  const { allViews, allPosts, totalPayout } = getAllTimeStats(creator);
+  const allPosts = getAllTimePostCount(creator);
+  const allViews = cycleData?.activeCycle
+    ? cycleData.activeCycle.baseline_views + cycleData.activeCycle.views_earned
+    : 0;
+  const totalPaidOut = (cycleData?.cycleHistory ?? [])
+    .filter(c => c.status !== "in_progress")
+    .reduce((sum, c) => sum + (c.payout_amount ?? 0), 0);
   const monthly_target = creator.monthly_target ?? 30;
 
   return (
@@ -416,7 +408,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
           />
           <StatCard
             Icon={DollarSign} label="Total Paid Out"
-            value={`$${totalPayout.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            value={`$${totalPaidOut.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             sub="Since joining"
             color="green"
           />
@@ -690,6 +682,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
               <thead>
                 <tr className="text-gray-500 text-xs border-b border-white/[0.1]">
                   <th className="text-left px-5 py-3">Post</th>
+                  <th className="text-left px-4 py-3">Platform</th>
                   <th className="text-left px-4 py-3">Type</th>
                   <th className="text-right px-4 py-3">Views</th>
                   <th className="text-right px-4 py-3 hidden md:table-cell">Likes</th>
@@ -717,6 +710,14 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                           {p.taken_at ? new Date(p.taken_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                         </span>
                       </div>
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        p.platform === "instagram" ? "bg-pink-500/10 text-pink-400 border border-pink-500/20" :
+                        "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                      }`}>
+                        {p.platform === "instagram" ? "Instagram" : "TikTok"}
+                      </span>
                     </td>
                     <td className="px-4 py-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${

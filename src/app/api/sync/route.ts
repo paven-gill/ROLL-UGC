@@ -12,10 +12,11 @@ async function storeSnapshot(
   platform: "instagram" | "tiktok",
   data: ScrapedData
 ) {
-  const today = new Date().toISOString().split("T")[0];
-  const now = new Date().toISOString();
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
+  const nowTs = new Date();
+  const today = nowTs.toISOString().split("T")[0];
+  const now = nowTs.toISOString();
+  const currentYear = nowTs.getUTCFullYear();
+  const currentMonth = nowTs.getUTCMonth() + 1;
 
   await db.from("view_snapshots").upsert(
     {
@@ -31,7 +32,7 @@ async function storeSnapshot(
   );
 
   // Analytics cache — calendar-month delta (not used for payouts)
-  const firstOfMonth = new Date(currentYear, currentMonth - 1, 1).toISOString().split("T")[0];
+  const firstOfMonth = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
   const { data: prevSnap } = await db
     .from("view_snapshots")
     .select("cumulative_views")
@@ -144,7 +145,45 @@ async function checkAndUpdateCycle(
   return { action: "in_progress", views_so_far: Math.max(0, totalViews - cycle.baseline_views) };
 }
 
-// ─── GET /api/sync (daily cron at 6am UTC) ────────────────────────────────────
+// ─── Sync one creator (both platforms in parallel) ───────────────────────────
+
+async function syncCreator(
+  db: ReturnType<typeof createServerClient>,
+  creator: { id: string; name: string; instagram_username?: string | null; tiktok_username?: string | null; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
+) {
+  const result: Record<string, unknown> = { name: creator.name };
+
+  const [igResult, ttResult] = await Promise.allSettled([
+    creator.instagram_username
+      ? scrapeInstagram(creator.instagram_username, creator.joined_at)
+          .then(async data => { await storeSnapshot(db, creator.id, "instagram", data); return data; })
+      : Promise.resolve(null),
+    creator.tiktok_username
+      ? scrapeTikTok(creator.tiktok_username, creator.joined_at)
+          .then(async data => { await storeSnapshot(db, creator.id, "tiktok", data); return data; })
+      : Promise.resolve(null),
+  ]);
+
+  if (igResult.status === "fulfilled" && igResult.value) {
+    result.instagram = { cumulative_views: igResult.value.cumulative_views };
+  } else if (igResult.status === "rejected") {
+    result.instagram_error = String(igResult.reason);
+  }
+
+  if (ttResult.status === "fulfilled" && ttResult.value) {
+    result.tiktok = { cumulative_views: ttResult.value.cumulative_views };
+  } else if (ttResult.status === "rejected") {
+    result.tiktok_error = String(ttResult.reason);
+  }
+
+  try {
+    result.cycle = await checkAndUpdateCycle(db, creator);
+  } catch (e) { result.cycle_error = String(e); }
+
+  return result;
+}
+
+// ─── GET /api/sync (daily cron at 11:55pm UTC) ────────────────────────────────
 
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
@@ -160,32 +199,7 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const results = [];
-  for (const creator of creators ?? []) {
-    const result: Record<string, unknown> = { name: creator.name };
-
-    if (creator.instagram_username) {
-      try {
-        const data = await scrapeInstagram(creator.instagram_username, creator.joined_at);
-        await storeSnapshot(db, creator.id, "instagram", data);
-        result.instagram = { cumulative_views: data.cumulative_views };
-      } catch (e) { result.instagram_error = String(e); }
-    }
-
-    if (creator.tiktok_username) {
-      try {
-        const data = await scrapeTikTok(creator.tiktok_username, creator.joined_at);
-        await storeSnapshot(db, creator.id, "tiktok", data);
-        result.tiktok = { cumulative_views: data.cumulative_views };
-      } catch (e) { result.tiktok_error = String(e); }
-    }
-
-    try {
-      result.cycle = await checkAndUpdateCycle(db, creator);
-    } catch (e) { result.cycle_error = String(e); }
-
-    results.push(result);
-  }
+  const results = await Promise.all((creators ?? []).map(creator => syncCreator(db, creator)));
 
   return NextResponse.json({ results, synced_at: new Date().toISOString() });
 }

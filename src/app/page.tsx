@@ -22,6 +22,8 @@ type TimeRangeType = "7d" | "14d" | "30d" | "month" | "all";
 
 interface CreatorRow extends Creator {
   metrics: MonthlyMetrics[];
+  completed_payout_total: number;
+  completed_views_total: number;
 }
 
 interface RangeSummary {
@@ -68,6 +70,20 @@ interface CycleRecord {
   status: "pending" | "paid" | "in_progress";
 }
 
+interface PayoutEvent {
+  date: string;
+  creator_name: string;
+  cycle_start_date: string;
+  cycle_end_date: string;
+  base_fee: number;
+}
+
+interface ChartPoint {
+  name: string;
+  Views: number;
+  payoutEvents?: PayoutEvent[];
+}
+
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function fmt(n: number): string {
@@ -78,7 +94,7 @@ function fmt(n: number): string {
 
 function fmtMoney(n: number): string {
   return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", maximumFractionDigits: 0,
+    style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(n);
 }
 
@@ -89,23 +105,16 @@ function fmtDate(dateStr: string | null): string {
 }
 
 function getAllTimeSummary(creator: CreatorRow) {
-  const joinDate = creator.joined_at ? new Date(creator.joined_at + "T00:00:00") : null;
   let allViews = 0, allPosts = 0;
-  // Group by month to avoid double-counting base fee per platform
-  const monthViews = new Map<string, number>();
   for (const m of creator.metrics) {
     allViews += m.total_views;
     allPosts += m.post_count;
-    const key = `${m.year}-${m.month}`;
-    monthViews.set(key, (monthViews.get(key) ?? 0) + m.total_views);
   }
-  let totalPayout = 0;
-  monthViews.forEach((views, key) => {
-    const [y, mo] = key.split("-").map(Number);
-    const monthEnd = new Date(y, mo, 0);
-    const baseFee = !joinDate || joinDate <= monthEnd ? creator.base_fee : 0;
-    totalPayout += baseFee + (views / 1000) * creator.rate_per_thousand_views;
-  });
+  // Closed cycles: use the actual recorded payout (base fee + view bonus)
+  // Current cycle: add only the view bonus for views not yet in a closed cycle
+  const inProgressViews = Math.max(0, allViews - (creator.completed_views_total ?? 0));
+  const totalPayout = (creator.completed_payout_total ?? 0)
+    + (inProgressViews / 1000) * creator.rate_per_thousand_views;
   return { allViews, allPosts, totalPayout };
 }
 
@@ -350,17 +359,19 @@ function CreatorPicker({
 
 // ─── Post grid ────────────────────────────────────────────────────────────────
 
-function PostGrid({ posts }: { posts: PostRow[] }) {
+function PostGrid({ posts, tiktokUsername }: { posts: PostRow[]; tiktokUsername?: string | null }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
       {posts.map((p, i) => {
-        const igUrl = p.platform === "instagram"
+        const postUrl = p.platform === "instagram"
           ? `https://www.instagram.com/reel/${p.post_id}/`
+          : p.platform === "tiktok" && tiktokUsername
+          ? `https://www.tiktok.com/@${tiktokUsername}/video/${p.post_id}`
           : undefined;
         return (
           <a
             key={p.post_id}
-            href={igUrl}
+            href={postUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="group bg-[#0d0d15]/75 backdrop-blur-sm border border-white/[0.12] hover:border-white/[0.24] hover:bg-[#0d0d15]/90 rounded-xl overflow-hidden transition-all block hover:shadow-[0_4px_24px_rgba(0,0,0,0.5)]"
@@ -389,9 +400,12 @@ function PostGrid({ posts }: { posts: PostRow[] }) {
                   ? new Date(p.taken_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
                   : "—"}
               </span>
-              {igUrl && (
+              {postUrl && (
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
-                  <Instagram size={28} className="text-white drop-shadow" />
+                  {p.platform === "tiktok"
+                    ? <Music2 size={28} className="text-white drop-shadow" />
+                    : <Instagram size={28} className="text-white drop-shadow" />
+                  }
                 </div>
               )}
             </div>
@@ -430,44 +444,66 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const [creatorPosts, setCreatorPosts] = useState<PostRow[]>([]);
   const [allCreatorPosts, setAllCreatorPosts] = useState<Map<string, PostRow[]>>(new Map());
   const [postsLoading, setPostsLoading] = useState(false);
-  const [chartData, setChartData] = useState<{ name: string; Views: number }[]>([]);
+  const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [platformFilter, setPlatformFilter] = useState<"all" | "instagram" | "tiktok">("all");
 
   // Chart: daily deltas for rolling/month ranges; 12-month aggregates for all-time
+  // For daily views, also fetch completed cycle end dates to overlay payout dot markers.
   useEffect(() => {
     const cParam = selectedCreatorId ? `&creator_id=${selectedCreatorId}` : "";
-    let url: string;
+    if (rangeType === "all") {
+      fetch(`/api/dashboard/chart?months=12${cParam}`)
+        .then(r => r.json())
+        .then(data => setChartData(Array.isArray(data) ? data : []));
+      return;
+    }
+    const now = new Date();
+    let chartUrl: string;
+    let from: string;
+    let to: string;
     if (rangeType === "7d" || rangeType === "14d" || rangeType === "30d") {
       const days = rangeType === "7d" ? 7 : rangeType === "14d" ? 14 : 30;
-      url = `/api/dashboard/chart-range?days=${days}${cParam}`;
-    } else if (rangeType === "month") {
-      url = `/api/dashboard/chart-range?year=${selYear}&month=${selMonth}${cParam}`;
+      chartUrl = `/api/dashboard/chart-range?days=${days}${cParam}`;
+      const fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+      from = fromDate.toISOString().split("T")[0];
+      to = now.toISOString().split("T")[0];
     } else {
-      url = `/api/dashboard/chart?months=12${cParam}`;
+      chartUrl = `/api/dashboard/chart-range?year=${selYear}&month=${selMonth}${cParam}`;
+      const daysInMonth = new Date(selYear, selMonth, 0).getDate();
+      from = `${selYear}-${String(selMonth).padStart(2, "0")}-01`;
+      to = `${selYear}-${String(selMonth).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
     }
-    fetch(url)
-      .then(r => r.json())
-      .then(data => setChartData(Array.isArray(data) ? data : []));
+    Promise.all([
+      fetch(chartUrl).then(r => r.json()),
+      fetch(`/api/dashboard/payout-events?from=${from}&to=${to}${cParam}`).then(r => r.json()),
+    ]).then(([chartRaw, eventsRaw]) => {
+      const events: PayoutEvent[] = Array.isArray(eventsRaw) ? eventsRaw : [];
+      const points: { name: string; Views: number }[] = Array.isArray(chartRaw) ? chartRaw : [];
+      const merged: ChartPoint[] = points.map(point => {
+        const dayEvents = events.filter(e => {
+          const [y, m, d] = e.date.split("-").map(Number);
+          const label = new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return label === point.name;
+        });
+        return dayEvents.length > 0 ? { ...point, payoutEvents: dayEvents } : point;
+      });
+      setChartData(merged);
+    });
   }, [rangeType, selYear, selMonth, selectedCreatorId]);
 
   // Stats: all-time from creators data; rolling windows from range API; month from cycles API
   useEffect(() => {
     setRangeApprox(false);
     if (rangeType === "all") {
-      const allTimeSummaries: RangeSummary[] = creators.filter(c => c.active).map(c => {
-        const ig_views = c.metrics.filter(m => m.platform === "instagram").reduce((s, m) => s + m.total_views, 0);
-        const tt_views = c.metrics.filter(m => m.platform === "tiktok").reduce((s, m) => s + m.total_views, 0);
-        const { allPosts, totalPayout } = getAllTimeSummary(c);
-        return {
-          id: c.id, name: c.name,
-          instagram_username: c.instagram_username, tiktok_username: c.tiktok_username,
-          ig_views, tt_views, total_views: ig_views + tt_views,
-          ig_posts: 0, tt_posts: 0, total_posts: allPosts,
-          payout: totalPayout,
-        };
-      });
-      setSummaries(allTimeSummaries);
-      setStatsLoading(false);
+      setStatsLoading(true);
+      const cParam = selectedCreatorId ? `&creator_id=${selectedCreatorId}` : "";
+      fetch(`/api/dashboard/range?days=1095${cParam}`)
+        .then(r => r.json())
+        .then(res => {
+          setSummaries(Array.isArray(res.results) ? res.results : []);
+          setRangeApprox(!res.windowAccurate);
+          setStatsLoading(false);
+        });
       return;
     }
     setStatsLoading(true);
@@ -477,16 +513,18 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
         .then((cycles: CycleRecord[]) => {
           const byCreator = new Map<string, RangeSummary>();
           for (const c of (Array.isArray(cycles) ? cycles : [])) {
+            // Base fee only counts when the cycle is complete (pending/paid), not while in-progress
+            const contribution = c.status === "in_progress" ? c.view_bonus : c.payout_amount;
             const existing = byCreator.get(c.creator_id);
             if (existing) {
               existing.total_views += c.views_earned;
-              existing.payout += c.payout_amount;
+              existing.payout += contribution;
             } else {
               byCreator.set(c.creator_id, {
                 id: c.creator_id, name: c.creator_name,
                 instagram_username: c.instagram_username, tiktok_username: c.tiktok_username,
                 ig_views: 0, tt_views: 0, total_views: c.views_earned,
-                ig_posts: 0, tt_posts: 0, total_posts: 0, payout: c.payout_amount,
+                ig_posts: 0, tt_posts: 0, total_posts: 0, payout: contribution,
               });
             }
           }
@@ -661,7 +699,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
           </span>
         </div>
         <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+          <AreaChart data={chartData} margin={{ top: 24, right: 5, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="gViews" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor="#34d399" stopOpacity={0.25} />
@@ -673,6 +711,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
               dataKey="name"
               tick={{ fill: "#6b7280", fontSize: 11 }}
               axisLine={false} tickLine={false}
+              interval="preserveStartEnd"
             />
             <YAxis
               tick={{ fill: "#6b7280", fontSize: 11 }}
@@ -680,12 +719,49 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
               tickFormatter={v => fmt(v as number)}
             />
             <Tooltip
-              contentStyle={{ backgroundColor: "rgba(10,10,18,0.95)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", fontSize: "12px" }}
-              labelStyle={{ color: "#9ca3af" }}
-              itemStyle={{ color: "#e5e7eb" }}
-              formatter={(v: unknown) => [fmt(v as number), "Views Earned"]}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                const point = payload[0]?.payload as ChartPoint;
+                return (
+                  <div style={{ backgroundColor: "rgba(10,10,18,0.95)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", padding: "8px 12px", fontSize: "12px", lineHeight: "1.6" }}>
+                    <p style={{ color: "#9ca3af", marginBottom: "2px" }}>{label}</p>
+                    <p style={{ color: "#e5e7eb" }}>{fmt(point.Views)} views</p>
+                    {point.payoutEvents?.map((evt, i) => (
+                      <div key={i} style={{ marginTop: "8px", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
+                        <p style={{ color: "#34d399", fontWeight: 600, marginBottom: "2px" }}>Cycle complete · {evt.creator_name}</p>
+                        <p style={{ color: "#9ca3af" }}>
+                          {new Date(evt.cycle_start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          {" → "}
+                          {new Date(evt.cycle_end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </p>
+                        <p style={{ color: "#9ca3af" }}>Base rate: ${evt.base_fee}/mo</p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }}
             />
-            <Area type="monotone" dataKey="Views" stroke="#34d399" fill="url(#gViews)" strokeWidth={2} dot={false} />
+            <Area
+              type="monotone"
+              dataKey="Views"
+              stroke="#34d399"
+              fill="url(#gViews)"
+              strokeWidth={2}
+              dot={(props: any) => {
+                if (!props.payload?.payoutEvents?.length) return <g />;
+                return (
+                  <circle
+                    cx={props.cx}
+                    cy={props.cy}
+                    r={5}
+                    fill="#34d399"
+                    stroke="rgba(10,10,18,0.95)"
+                    strokeWidth={2.5}
+                  />
+                );
+              }}
+              activeDot={{ r: 4, fill: "#34d399", strokeWidth: 0 }}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -708,7 +784,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
               {creatorPosts.length === 0 ? "No posts synced yet" : `No posts in this period`}
             </div>
           ) : (
-            <PostGrid posts={displayCreatorPosts} />
+            <PostGrid posts={displayCreatorPosts} tiktokUsername={creators.find(c => c.id === selectedCreatorId)?.tiktok_username} />
           )}
         </div>
       ) : (
@@ -744,7 +820,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
                       {allPosts.length === 0 ? "No posts synced yet" : "No posts in this period"}
                     </div>
                   ) : (
-                    <PostGrid posts={posts} />
+                    <PostGrid posts={posts} tiktokUsername={creator.tiktok_username} />
                   )}
                 </div>
               );

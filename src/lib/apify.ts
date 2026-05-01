@@ -313,10 +313,21 @@ export async function scrapeTikTok(username: string, joinedAt?: string | null): 
   let posts_last_30_days = 0;
   const posts: PostSnapshot[] = [];
 
+  if (items.length > 0) {
+    const sample = items[0] as Record<string, unknown>;
+    console.log(`[apify] TikTok sample fields: createTimeISO=${sample.createTimeISO} createTime=${sample.createTime} playCount=${sample.playCount} id=${sample.id}`);
+  }
+
   for (const item of items as Record<string, unknown>[]) {
-    const dateStr =
-      (item.createTimeISO as string) ||
-      new Date((item.createTime as number) * 1000).toISOString();
+    // Build a date string — handle missing/invalid timestamps gracefully
+    let dateStr: string | null = null;
+    if (typeof item.createTimeISO === "string" && item.createTimeISO) {
+      dateStr = item.createTimeISO;
+    } else if (typeof item.createTime === "number" && item.createTime > 0) {
+      const d = new Date(item.createTime * 1000);
+      if (!isNaN(d.getTime())) dateStr = d.toISOString();
+    }
+    if (!dateStr) continue;
 
     // Skip posts before join date
     if (joinedAtTs && new Date(dateStr).getTime() < joinedAtTs) continue;

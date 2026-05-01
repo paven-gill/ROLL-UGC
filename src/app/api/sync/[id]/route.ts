@@ -12,10 +12,11 @@ async function storeSnapshot(
   platform: "instagram" | "tiktok",
   data: ScrapedData
 ) {
-  const today = new Date().toISOString().split("T")[0];
-  const now = new Date().toISOString();
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
+  const nowTs = new Date();
+  const today = nowTs.toISOString().split("T")[0];
+  const now = nowTs.toISOString();
+  const currentYear = nowTs.getUTCFullYear();
+  const currentMonth = nowTs.getUTCMonth() + 1;
 
   await db.from("view_snapshots").upsert(
     {
@@ -31,7 +32,7 @@ async function storeSnapshot(
   );
 
   // Analytics cache — calendar-month delta for the monthly_metrics table
-  const firstOfMonth = new Date(currentYear, currentMonth - 1, 1).toISOString().split("T")[0];
+  const firstOfMonth = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
   const { data: prevSnap } = await db
     .from("view_snapshots")
     .select("cumulative_views")
