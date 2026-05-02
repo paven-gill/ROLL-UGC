@@ -99,10 +99,8 @@ export async function GET(req: Request) {
     for (const combo of comboList) {
       const curr = snapMap.get(`${combo}|${date}`);
       if (curr === undefined) continue;
-      const prev = latestAtOrBefore(combo, pd);
-      if (prev !== undefined) {
-        totalViews += Math.max(0, curr - prev);
-      }
+      const prev = latestAtOrBefore(combo, pd) ?? 0;
+      totalViews += Math.max(0, curr - prev);
     }
     return { name: dateLabel(date), Views: totalViews };
   });
