@@ -1,5 +1,3 @@
-import { ApifyClient } from "apify-client";
-
 // ─── Instagram via RapidAPI (Instagram Looter2) ───────────────────────────────
 
 const IG_BASE = "https://instagram-looter2.p.rapidapi.com";
@@ -287,20 +285,39 @@ export async function scrapeInstagram(username: string, joinedAt?: string | null
 
 // ─── TikTok via Apify ─────────────────────────────────────────────────────────
 
-const apifyClient = new ApifyClient({ token: process.env.APIFY_API_TOKEN });
+async function apifyRunAndCollect(input: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const token = process.env.APIFY_API_TOKEN;
+  const runRes = await fetch(
+    `https://api.apify.com/v2/acts/clockworks~free-tiktok-scraper/runs?token=${token}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }
+  );
+  if (!runRes.ok) throw new Error(`Apify start run → ${runRes.status} ${runRes.statusText}`);
+  const runId = (await runRes.json()).data.id as string;
+
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5_000));
+    const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
+    const statusData = await statusRes.json();
+    const { status, defaultDatasetId } = statusData.data as { status: string; defaultDatasetId: string };
+    if (status === "SUCCEEDED") {
+      const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${defaultDatasetId}/items?token=${token}`);
+      return (await itemsRes.json()) as Record<string, unknown>[];
+    }
+    if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
+      throw new Error(`Apify actor run ${status}`);
+    }
+  }
+  throw new Error("Apify actor run timed out after 180s");
+}
 
 export async function scrapeTikTok(username: string, joinedAt?: string | null): Promise<ScrapedData> {
-  const run = await apifyClient.actor("clockworks/free-tiktok-scraper").call(
-    {
-      profiles: [`https://www.tiktok.com/@${username}`],
-      resultsPerPage: 100,
-      shouldDownloadVideos: false,
-      shouldDownloadCovers: false,
-    },
-    { waitSecs: 180 }
-  );
-
-  const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+  const items = await apifyRunAndCollect({
+    profiles: [`https://www.tiktok.com/@${username}`],
+    resultsPerPage: 100,
+    shouldDownloadVideos: false,
+    shouldDownloadCovers: false,
+  });
   if (!items.length) return { cumulative_views: 0, posts_last_30_days: 0, follower_count: 0, posts: [] };
 
   const first = items[0] as Record<string, unknown>;
