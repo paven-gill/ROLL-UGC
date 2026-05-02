@@ -445,6 +445,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const [allCreatorPosts, setAllCreatorPosts] = useState<Map<string, PostRow[]>>(new Map());
   const [postsLoading, setPostsLoading] = useState(false);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [chartLoading, setChartLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<"all" | "instagram" | "tiktok">("all");
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -452,11 +453,13 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   // Chart: daily deltas for rolling/month ranges; 12-month aggregates for all-time
   // For daily views, also fetch completed cycle end dates to overlay payout dot markers.
   useEffect(() => {
+    setChartLoading(true);
     const cParam = selectedCreatorId ? `&creator_id=${selectedCreatorId}` : "";
     if (rangeType === "all") {
       fetch(`/api/dashboard/chart?months=12${cParam}`)
         .then(r => r.json())
-        .then(data => setChartData(Array.isArray(data) ? data : []));
+        .then(data => { setChartData(Array.isArray(data) ? data : []); setChartLoading(false); })
+        .catch(() => { setChartData([]); setChartLoading(false); });
       return;
     }
     const now = new Date();
@@ -490,7 +493,8 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
         return dayEvents.length > 0 ? { ...point, payoutEvents: dayEvents } : point;
       });
       setChartData(merged);
-    });
+      setChartLoading(false);
+    }).catch(() => { setChartData([]); setChartLoading(false); });
   }, [rangeType, selYear, selMonth, selectedCreatorId]);
 
   // Stats: all-time from creators data; rolling windows from range API; month from cycles API
@@ -703,7 +707,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
             {!selectedCreatorId ? " · all creators" : ""}
           </span>
         </div>
-        {!mounted ? <div style={{ height: 240 }} /> : chartData.length === 0 || chartData.every(p => p.Views === 0) ? (
+        {!mounted || chartLoading ? <div style={{ height: 240 }} className="flex items-center justify-center text-gray-600 text-sm">{mounted && chartLoading ? "Loading…" : ""}</div> : chartData.length === 0 || chartData.every(p => p.Views === 0) ? (
           <div style={{ height: 240 }} className="flex items-center justify-center text-gray-600 text-sm">No view data for this period</div>
         ) : <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData} margin={{ top: 24, right: 5, left: -20, bottom: 0 }}>
