@@ -195,6 +195,11 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const [editSection, setEditSection] = useState<EditSection>(null);
   const [saving,      setSaving]      = useState(false);
   const [posts,       setPosts]       = useState<PostRow[]>([]);
+  const [showAllPosts,   setShowAllPosts]   = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [editingCycle,   setEditingCycle]   = useState(false);
+  const [cycleStartInput, setCycleStartInput] = useState("");
+  const [savingCycle,    setSavingCycle]    = useState(false);
 
   const [paymentForm, setPaymentForm] = useState({
     base_fee: "", rate_per_thousand_views: "", affiliate_percentage: "",
@@ -280,6 +285,35 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     router.push("/");
   }
 
+  async function saveCycleStart() {
+    if (!cycleStartInput) return;
+    setSavingCycle(true);
+    await fetch(`/api/creators/${params.id}/cycles`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cycle_start_date: cycleStartInput }),
+    });
+    setEditingCycle(false);
+    await fetchCreator();
+    setSavingCycle(false);
+  }
+
+  async function excludePost(post: PostRow) {
+    if (!confirm("Remove this post from tracking? It won't re-appear on future syncs.")) return;
+    const key = `${post.post_id}__${post.platform}`;
+    setDeletingPostId(key);
+    await fetch("/api/posts/exclude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ post_id: post.post_id, creator_id: params.id, platform: post.platform }),
+    });
+    // Remove from local list immediately, then re-fetch all stats so every
+    // number (views, post count, cycle history, payouts) reflects the removal.
+    setPosts(prev => prev.filter(p => !(p.post_id === post.post_id && p.platform === post.platform)));
+    setDeletingPostId(null);
+    await fetchCreator();
+  }
+
   async function sync() {
     setSyncing(true);
     setSyncMsg(null);
@@ -314,10 +348,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     );
   }
 
-  const allPosts = getAllTimePostCount(creator);
-  const allViews = cycleData?.activeCycle
-    ? cycleData.activeCycle.baseline_views + cycleData.activeCycle.views_earned
-    : 0;
+  const allPosts = posts.length;
+  const allViews = posts.reduce((s, p) => s + p.view_count_used, 0);
   const totalPaidOut = (cycleData?.cycleHistory ?? [])
     .filter(c => c.status !== "in_progress")
     .reduce((sum, c) => sum + (c.payout_amount ?? 0), 0);
@@ -572,10 +604,45 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                           <p className="text-gray-600 text-xs mt-0.5">Baseline: {fmt(ac.baseline_views)} views</p>
                         </div>
                         <div>
-                          <p className="text-gray-500 text-xs mb-1">Current Cycle</p>
-                          <p className="text-white text-sm font-medium">
-                            {fmtShortDate(ac.cycle_start_date)} → {fmtShortDate(ac.cycle_end_date)}
-                          </p>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <p className="text-gray-500 text-xs">Current Cycle</p>
+                            {!editingCycle && (
+                              <button
+                                onClick={() => { setCycleStartInput(ac.cycle_start_date); setEditingCycle(true); }}
+                                className="text-gray-700 hover:text-gray-400 transition-colors"
+                                title="Adjust cycle start"
+                              >
+                                <Pencil size={10}/>
+                              </button>
+                            )}
+                          </div>
+                          {editingCycle ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="date"
+                                value={cycleStartInput}
+                                onChange={e => setCycleStartInput(e.target.value)}
+                                className="bg-white/[0.04] border border-white/[0.12] rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-emerald-500/60"
+                              />
+                              <button
+                                onClick={saveCycleStart}
+                                disabled={savingCycle}
+                                className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 transition-colors"
+                              >
+                                <Check size={13}/>
+                              </button>
+                              <button
+                                onClick={() => setEditingCycle(false)}
+                                className="text-xs text-gray-600 hover:text-white transition-colors"
+                              >
+                                <X size={13}/>
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-white text-sm font-medium">
+                              {fmtShortDate(ac.cycle_start_date)} → {fmtShortDate(ac.cycle_end_date)}
+                            </p>
+                          )}
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs mb-1">Days Remaining</p>
@@ -673,10 +740,16 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
         {/* Individual Posts */}
         {posts.length > 0 && (
           <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-white/[0.1]">
+            <div className="px-5 py-3.5 border-b border-white/[0.1] flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-200">
                 Recent Posts <span className="text-gray-600 font-normal">(last 10)</span>
               </h2>
+              <button
+                onClick={() => setShowAllPosts(true)}
+                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                All posts →
+              </button>
             </div>
             <table className="w-full text-sm">
               <thead>
@@ -768,6 +841,113 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
           </div>
         </div>
       </div>
+
+      {/* ── All Posts Modal ── */}
+      {showAllPosts && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowAllPosts(false)}
+          />
+          <div className="relative z-10 w-full max-w-5xl max-h-[90vh] flex flex-col bg-[#0d0d15] border border-white/[0.14] rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.1] shrink-0">
+              <h2 className="text-sm font-semibold text-gray-200">
+                All Posts <span className="text-gray-600 font-normal">({posts.length})</span>
+              </h2>
+              <button
+                onClick={() => setShowAllPosts(false)}
+                className="text-gray-600 hover:text-white transition-colors"
+              >
+                <X size={16}/>
+              </button>
+            </div>
+            <div className="overflow-y-auto">
+              {posts.length === 0 ? (
+                <p className="text-center text-gray-600 text-sm py-12">No posts synced yet.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-[#0d0d15]">
+                    <tr className="text-gray-500 text-xs border-b border-white/[0.1]">
+                      <th className="text-left px-5 py-3">Post</th>
+                      <th className="text-left px-4 py-3">Platform</th>
+                      <th className="text-left px-4 py-3">Type</th>
+                      <th className="text-right px-4 py-3">Views</th>
+                      <th className="text-right px-4 py-3 hidden md:table-cell">Likes</th>
+                      <th className="text-right px-4 py-3 hidden md:table-cell">Comments</th>
+                      <th className="w-10"/>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {posts.map(p => {
+                      const key = `${p.post_id}__${p.platform}`;
+                      return (
+                        <tr key={key} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
+                          <td className="px-5 py-2">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg overflow-hidden bg-white/[0.05] shrink-0">
+                                {p.thumbnail_url ? (
+                                  <img
+                                    src={`/api/proxy-image?url=${encodeURIComponent(p.thumbnail_url)}`}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-gray-700 text-[10px]">—</div>
+                                )}
+                              </div>
+                              <span className="text-gray-400 text-xs">
+                                {p.taken_at ? new Date(p.taken_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              p.platform === "instagram" ? "bg-pink-500/10 text-pink-400 border border-pink-500/20" :
+                              "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                            }`}>
+                              {p.platform === "instagram" ? "Instagram" : "TikTok"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              p.media_type === "video" ? "bg-blue-500/10 text-blue-400" :
+                              p.media_type === "photo" ? "bg-gray-500/10 text-gray-400" :
+                              p.media_type === "carousel" ? "bg-purple-500/10 text-purple-400" :
+                              "bg-gray-800 text-gray-600"
+                            }`}>
+                              {p.media_type ?? "unknown"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-right font-medium">
+                            {p.view_count_used > 0 ? fmt(p.view_count_used) : <span className="text-gray-600">—</span>}
+                          </td>
+                          <td className="px-4 py-2 text-right hidden md:table-cell text-gray-400 text-xs">
+                            {p.like_count > 0 ? fmt(p.like_count) : <span className="text-gray-700">—</span>}
+                          </td>
+                          <td className="px-4 py-2 text-right hidden md:table-cell text-gray-400 text-xs">
+                            {p.comment_count > 0 ? fmt(p.comment_count) : <span className="text-gray-700">—</span>}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            <button
+                              onClick={() => excludePost(p)}
+                              disabled={deletingPostId === key}
+                              className="text-gray-700 hover:text-red-400 disabled:opacity-30 transition-colors"
+                              title="Remove from tracking"
+                            >
+                              <Trash2 size={13}/>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

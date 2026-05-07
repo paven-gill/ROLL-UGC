@@ -4,10 +4,18 @@ import { createServerClient } from "@/lib/supabase";
 export async function GET() {
   const db = createServerClient();
 
-  const [{ data: creators, error }, { data: metrics }, { data: payouts }] = await Promise.all([
+  const [
+    { data: creators, error },
+    { data: metrics },
+    { data: payouts },
+    { data: cycles },
+    { data: snapshots },
+  ] = await Promise.all([
     db.from("creators").select("*").order("name"),
     db.from("monthly_metrics").select("*").order("year", { ascending: false }).order("month", { ascending: false }),
     db.from("payout_cycles").select("creator_id, payout_amount, views_earned, status"),
+    db.from("creator_cycles").select("creator_id, baseline_views"),
+    db.from("view_snapshots").select("creator_id, platform, snapshot_date, cumulative_views").order("snapshot_date", { ascending: false }),
   ]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -28,12 +36,37 @@ export async function GET() {
     payoutsByCreator.set(p.creator_id, existing);
   }
 
-  const result = (creators ?? []).map(c => ({
-    ...c,
-    metrics: metricsByCreator.get(c.id) ?? [],
-    completed_payout_total: payoutsByCreator.get(c.id)?.completed_payout_total ?? 0,
-    completed_views_total:  payoutsByCreator.get(c.id)?.completed_views_total  ?? 0,
-  }));
+  // Baseline views per creator from their active cycle
+  const baselineByCreator = new Map<string, number>();
+  for (const c of cycles ?? []) {
+    baselineByCreator.set(c.creator_id, c.baseline_views ?? 0);
+  }
+
+  // Latest cumulative_views per creator+platform (snapshots already ordered desc by date)
+  const latestSnapByKey = new Map<string, number>();
+  for (const s of snapshots ?? []) {
+    const key = `${s.creator_id}::${s.platform}`;
+    if (!latestSnapByKey.has(key)) latestSnapByKey.set(key, s.cumulative_views ?? 0);
+  }
+
+  // Sum latest cumulative views per creator across all platforms
+  const latestTotalByCreator = new Map<string, number>();
+  latestSnapByKey.forEach((cumViews, key) => {
+    const creatorId = key.split("::")[0];
+    latestTotalByCreator.set(creatorId, (latestTotalByCreator.get(creatorId) ?? 0) + cumViews);
+  });
+
+  const result = (creators ?? []).map(c => {
+    const baseline = baselineByCreator.get(c.id) ?? 0;
+    const latestTotal = latestTotalByCreator.get(c.id) ?? 0;
+    return {
+      ...c,
+      metrics: metricsByCreator.get(c.id) ?? [],
+      completed_payout_total: payoutsByCreator.get(c.id)?.completed_payout_total ?? 0,
+      completed_views_total:  payoutsByCreator.get(c.id)?.completed_views_total  ?? 0,
+      current_cycle_views: Math.max(0, latestTotal - baseline),
+    };
+  });
   return NextResponse.json(result);
 }
 

@@ -18,12 +18,25 @@ async function storeSnapshot(
   const currentYear = nowTs.getUTCFullYear();
   const currentMonth = nowTs.getUTCMonth() + 1;
 
+  // Compute adjusted cumulative_views by subtracting views of excluded posts
+  const { data: excludedForViews } = await db
+    .from("excluded_posts")
+    .select("post_id")
+    .eq("creator_id", creatorId)
+    .eq("platform", platform);
+
+  const excludedIdsForViews = new Set((excludedForViews ?? []).map((e: { post_id: string }) => e.post_id));
+  const excludedViewsSum = data.posts
+    .filter(p => excludedIdsForViews.has(p.post_id))
+    .reduce((s, p) => s + p.view_count_used, 0);
+  const adjustedCumulativeViews = Math.max(0, data.cumulative_views - excludedViewsSum);
+
   await db.from("view_snapshots").upsert(
     {
       creator_id: creatorId,
       platform,
       snapshot_date: today,
-      cumulative_views: data.cumulative_views,
+      cumulative_views: adjustedCumulativeViews,
       post_count_30d: data.posts_last_30_days,
       follower_count: data.follower_count,
       synced_at: now,
@@ -62,6 +75,18 @@ async function storeSnapshot(
   );
 
   if (data.posts.length > 0) {
+    // Filter out any posts the user has manually excluded
+    const { data: excluded } = await db
+      .from("excluded_posts")
+      .select("post_id")
+      .eq("creator_id", creatorId)
+      .eq("platform", platform);
+
+    const excludedIds = new Set((excluded ?? []).map((e: { post_id: string }) => e.post_id));
+    const filteredPosts = excludedIds.size > 0
+      ? data.posts.filter(p => !excludedIds.has(p.post_id))
+      : data.posts;
+
     const { error: delError } = await db
       .from("post_snapshots")
       .delete()
@@ -69,14 +94,18 @@ async function storeSnapshot(
       .eq("platform", platform);
     if (delError) console.error("[sync] post_snapshots delete error:", delError);
 
-    const rows = data.posts.map(({ raw_fields: _raw, ...p }) => ({
-      ...p,
-      creator_id: creatorId,
-      synced_at: now,
-    }));
-    const { error: insertError } = await db.from("post_snapshots").insert(rows);
-    if (insertError) console.error("[sync] post_snapshots insert error:", insertError);
-    else console.log(`[sync] inserted ${rows.length} post_snapshots`);
+    if (filteredPosts.length > 0) {
+      const rows = filteredPosts.map(({ raw_fields: _raw, ...p }) => ({
+        ...p,
+        creator_id: creatorId,
+        synced_at: now,
+      }));
+      const { error: insertError } = await db.from("post_snapshots").insert(rows);
+      if (insertError) console.error("[sync] post_snapshots insert error:", insertError);
+      else console.log(`[sync] inserted ${rows.length} post_snapshots (${excludedIds.size} excluded)`);
+    } else {
+      console.log(`[sync] all ${data.posts.length} posts excluded, skipping insert`);
+    }
   }
 }
 

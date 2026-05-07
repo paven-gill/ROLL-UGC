@@ -106,3 +106,52 @@ export async function GET(
 
   return NextResponse.json({ activeCycle, cycleHistory, lastSyncedAt });
 }
+
+// PATCH /api/creators/[id]/cycles
+// Adjusts the active cycle start date. End date = start + 30 days.
+// Baseline views are looked up from view_snapshots at the new start date.
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  const db = createServerClient();
+  const creatorId = params.id;
+  const { cycle_start_date } = await req.json() as { cycle_start_date: string };
+
+  if (!cycle_start_date) {
+    return NextResponse.json({ error: "cycle_start_date required" }, { status: 400 });
+  }
+
+  // Compute new end date (start + 30 days)
+  const startMs = new Date(cycle_start_date + "T00:00:00Z").getTime();
+  const endDate = new Date(startMs + 30 * 86400000).toISOString().split("T")[0];
+
+  // Find baseline_views from the most recent view_snapshot on or before new start date
+  const { data: snaps } = await db
+    .from("view_snapshots")
+    .select("platform, cumulative_views, snapshot_date")
+    .eq("creator_id", creatorId)
+    .lte("snapshot_date", cycle_start_date)
+    .order("snapshot_date", { ascending: false });
+
+  const byPlatform = new Map<string, number>();
+  for (const s of snaps ?? []) {
+    if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
+  }
+  const baseline_views = Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
+
+  const { error } = await db
+    .from("creator_cycles")
+    .update({
+      cycle_start_date,
+      cycle_end_date: endDate,
+      baseline_views,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("creator_id", creatorId);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true, cycle_start_date, cycle_end_date: endDate, baseline_views });
+}

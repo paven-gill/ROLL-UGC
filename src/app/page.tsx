@@ -24,6 +24,7 @@ interface CreatorRow extends Creator {
   metrics: MonthlyMetrics[];
   completed_payout_total: number;
   completed_views_total: number;
+  current_cycle_views: number;
 }
 
 interface RangeSummary {
@@ -105,16 +106,15 @@ function fmtDate(dateStr: string | null): string {
 }
 
 function getAllTimeSummary(creator: CreatorRow) {
-  let allViews = 0, allPosts = 0;
-  for (const m of creator.metrics) {
-    allViews += m.total_views;
-    allPosts += m.post_count;
-  }
-  // Closed cycles: use the actual recorded payout (base fee + view bonus)
-  // Current cycle: add only the view bonus for views not yet in a closed cycle
-  const inProgressViews = Math.max(0, allViews - (creator.completed_views_total ?? 0));
+  let allPosts = 0;
+  for (const m of creator.metrics) allPosts += m.post_count;
+
+  // All-time views = views earned in completed cycles + views earned in current cycle
+  const allViews = (creator.completed_views_total ?? 0) + (creator.current_cycle_views ?? 0);
+
+  // Total paid = completed cycle payouts + view bonus for the current in-progress cycle
   const totalPayout = (creator.completed_payout_total ?? 0)
-    + (inProgressViews / 1000) * creator.rate_per_thousand_views;
+    + ((creator.current_cycle_views ?? 0) / 1000) * creator.rate_per_thousand_views;
   return { allViews, allPosts, totalPayout };
 }
 

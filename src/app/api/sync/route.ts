@@ -199,7 +199,10 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const results = await Promise.all((creators ?? []).map(creator => syncCreator(db, creator)));
+  const results: Awaited<ReturnType<typeof syncCreator>>[] = [];
+  for (const creator of creators ?? []) {
+    results.push(await syncCreator(db, creator));
+  }
 
   return NextResponse.json({ results, synced_at: new Date().toISOString() });
 }

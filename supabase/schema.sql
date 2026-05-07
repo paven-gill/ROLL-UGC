@@ -94,6 +94,18 @@ CREATE TABLE monthly_metrics (
   UNIQUE(creator_id, platform, year, month)
 );
 
+-- ─── Excluded posts (posts removed from tracking) ────────────────────────────
+-- Posts the user has manually excluded. Sync reads this table and skips these
+-- post IDs so they never re-appear after being removed.
+
+CREATE TABLE excluded_posts (
+  post_id TEXT NOT NULL,
+  creator_id UUID REFERENCES creators(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'tiktok')),
+  excluded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  PRIMARY KEY (post_id, creator_id, platform)
+);
+
 -- ─── Security ─────────────────────────────────────────────────────────────────
 
 ALTER TABLE creators ENABLE ROW LEVEL SECURITY;
@@ -109,3 +121,4 @@ CREATE POLICY "service_role_all" ON creator_cycles FOR ALL USING (true);
 CREATE POLICY "service_role_all" ON payout_cycles FOR ALL USING (true);
 CREATE POLICY "service_role_all" ON post_snapshots FOR ALL USING (true);
 CREATE POLICY "service_role_all" ON monthly_metrics FOR ALL USING (true);
+CREATE POLICY "service_role_all" ON excluded_posts FOR ALL USING (true);
