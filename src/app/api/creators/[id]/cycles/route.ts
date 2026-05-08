@@ -26,7 +26,7 @@ export async function GET(
       .eq("creator_id", creatorId)
       .order("cycle_end_date", { ascending: false }),
     db.from("view_snapshots")
-      .select("platform, cumulative_views, snapshot_date")
+      .select("platform, cumulative_views, snapshot_date, synced_at")
       .eq("creator_id", creatorId)
       .order("snapshot_date", { ascending: false }),
     db.from("post_snapshots")
@@ -34,7 +34,7 @@ export async function GET(
       .eq("creator_id", creatorId),
   ]);
 
-  const lastSyncedAt = latestSnaps?.[0]?.snapshot_date ?? null;
+  const lastSyncedAt = latestSnaps?.[0]?.synced_at ?? null;
   console.log(`[cycles] creator=${creatorId} activeCycleRow=`, activeCycleRow, `completedCycles=`, completedCycles?.length ?? 0);
 
   const byPlatform = new Map<string, number>();

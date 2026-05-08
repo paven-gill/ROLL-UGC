@@ -75,6 +75,12 @@ function fmtShortDate(dateStr: string | null): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function fmtDateTime(isoStr: string | null): string {
+  if (!isoStr) return "—";
+  const d = new Date(isoStr);
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 function getAllTimePostCount(creator: CreatorDetail) {
   let allPosts = 0;
   for (const m of creator.metrics) allPosts += m.post_count;
@@ -197,6 +203,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const [posts,       setPosts]       = useState<PostRow[]>([]);
   const [showAllPosts,   setShowAllPosts]   = useState(false);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [selectedPosts,  setSelectedPosts]  = useState<Set<string>>(new Set());
+  const [bulkDeleting,   setBulkDeleting]   = useState(false);
   const [editingCycle,   setEditingCycle]   = useState(false);
   const [cycleStartInput, setCycleStartInput] = useState("");
   const [savingCycle,    setSavingCycle]    = useState(false);
@@ -311,6 +319,25 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     // number (views, post count, cycle history, payouts) reflects the removal.
     setPosts(prev => prev.filter(p => !(p.post_id === post.post_id && p.platform === post.platform)));
     setDeletingPostId(null);
+    await fetchCreator();
+  }
+
+  async function excludeSelectedPosts() {
+    if (selectedPosts.size === 0) return;
+    if (!confirm(`Remove ${selectedPosts.size} post${selectedPosts.size > 1 ? "s" : ""} from tracking? They won't re-appear on future syncs.`)) return;
+    setBulkDeleting(true);
+    const toDelete = posts.filter(p => selectedPosts.has(`${p.post_id}__${p.platform}`));
+    await Promise.all(toDelete.map(post =>
+      fetch("/api/posts/exclude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ post_id: post.post_id, creator_id: params.id, platform: post.platform }),
+      })
+    ));
+    const deletedKeys = new Set(toDelete.map(p => `${p.post_id}__${p.platform}`));
+    setPosts(prev => prev.filter(p => !deletedKeys.has(`${p.post_id}__${p.platform}`)));
+    setSelectedPosts(new Set());
+    setBulkDeleting(false);
     await fetchCreator();
   }
 
@@ -650,7 +677,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs mb-1">Last Synced</p>
-                          <p className="text-white text-sm font-medium">{fmtDate(cycleData.lastSyncedAt)}</p>
+                          <p className="text-white text-sm font-medium">{fmtDateTime(cycleData.lastSyncedAt)}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-4 gap-4">
@@ -847,19 +874,31 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowAllPosts(false)}
+            onClick={() => { setShowAllPosts(false); setSelectedPosts(new Set()); }}
           />
           <div className="relative z-10 w-full max-w-5xl max-h-[90vh] flex flex-col bg-[#0d0d15] border border-white/[0.14] rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.1] shrink-0">
               <h2 className="text-sm font-semibold text-gray-200">
                 All Posts <span className="text-gray-600 font-normal">({posts.length})</span>
               </h2>
-              <button
-                onClick={() => setShowAllPosts(false)}
-                className="text-gray-600 hover:text-white transition-colors"
-              >
-                <X size={16}/>
-              </button>
+              <div className="flex items-center gap-3">
+                {selectedPosts.size > 0 && (
+                  <button
+                    onClick={excludeSelectedPosts}
+                    disabled={bulkDeleting}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 size={12}/>
+                    {bulkDeleting ? "Removing…" : `Delete Selected (${selectedPosts.size})`}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setShowAllPosts(false); setSelectedPosts(new Set()); }}
+                  className="text-gray-600 hover:text-white transition-colors"
+                >
+                  <X size={16}/>
+                </button>
+              </div>
             </div>
             <div className="overflow-y-auto">
               {posts.length === 0 ? (
@@ -868,6 +907,14 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-[#0d0d15]">
                     <tr className="text-gray-500 text-xs border-b border-white/[0.1]">
+                      <th className="w-10 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          className="accent-indigo-500 cursor-pointer"
+                          checked={posts.length > 0 && selectedPosts.size === posts.length}
+                          onChange={e => setSelectedPosts(e.target.checked ? new Set(posts.map(p => `${p.post_id}__${p.platform}`)) : new Set())}
+                        />
+                      </th>
                       <th className="text-left px-5 py-3">Post</th>
                       <th className="text-left px-4 py-3">Platform</th>
                       <th className="text-left px-4 py-3">Type</th>
@@ -881,7 +928,19 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                     {posts.map(p => {
                       const key = `${p.post_id}__${p.platform}`;
                       return (
-                        <tr key={key} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
+                        <tr key={key} className={`border-b border-white/[0.04] hover:bg-white/[0.03] ${selectedPosts.has(key) ? "bg-white/[0.04]" : ""}`}>
+                          <td className="px-4 py-2">
+                            <input
+                              type="checkbox"
+                              className="accent-indigo-500 cursor-pointer"
+                              checked={selectedPosts.has(key)}
+                              onChange={() => setSelectedPosts(prev => {
+                                const next = new Set(prev);
+                                next.has(key) ? next.delete(key) : next.add(key);
+                                return next;
+                              })}
+                            />
+                          </td>
                           <td className="px-5 py-2">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-lg overflow-hidden bg-white/[0.05] shrink-0">
