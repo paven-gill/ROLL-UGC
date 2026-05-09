@@ -18,12 +18,26 @@ async function storeSnapshot(
   const currentYear = nowTs.getUTCFullYear();
   const currentMonth = nowTs.getUTCMonth() + 1;
 
+  // Fetch excluded posts once and reuse for both view adjustment and post filtering
+  const { data: excluded } = await db
+    .from("excluded_posts")
+    .select("post_id")
+    .eq("creator_id", creatorId)
+    .eq("platform", platform);
+
+  const excludedIds = new Set((excluded ?? []).map((e: { post_id: string }) => e.post_id));
+
+  const excludedViewsSum = data.posts
+    .filter(p => excludedIds.has(p.post_id))
+    .reduce((s, p) => s + p.view_count_used, 0);
+  const adjustedCumulativeViews = Math.max(0, data.cumulative_views - excludedViewsSum);
+
   await db.from("view_snapshots").upsert(
     {
       creator_id: creatorId,
       platform,
       snapshot_date: today,
-      cumulative_views: data.cumulative_views,
+      cumulative_views: adjustedCumulativeViews,
       post_count_30d: data.posts_last_30_days,
       follower_count: data.follower_count,
       synced_at: now,
@@ -62,10 +76,21 @@ async function storeSnapshot(
   );
 
   if (data.posts.length > 0) {
-    await db.from("post_snapshots").upsert(
-      data.posts.map(p => ({ ...p, creator_id: creatorId, synced_at: now })),
-      { onConflict: "post_id,creator_id,platform" }
-    );
+    const filteredPosts = excludedIds.size > 0
+      ? data.posts.filter(p => !excludedIds.has(p.post_id))
+      : data.posts;
+
+    await db
+      .from("post_snapshots")
+      .delete()
+      .eq("creator_id", creatorId)
+      .eq("platform", platform);
+
+    if (filteredPosts.length > 0) {
+      await db.from("post_snapshots").insert(
+        filteredPosts.map(p => ({ ...p, creator_id: creatorId, synced_at: now }))
+      );
+    }
   }
 }
 
