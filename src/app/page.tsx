@@ -25,6 +25,7 @@ interface CreatorRow extends Creator {
   completed_payout_total: number;
   completed_views_total: number;
   current_cycle_views: number;
+  tracked_post_count: number;
 }
 
 interface RangeSummary {
@@ -106,8 +107,7 @@ function fmtDate(dateStr: string | null): string {
 }
 
 function getAllTimeSummary(creator: CreatorRow) {
-  let allPosts = 0;
-  for (const m of creator.metrics) allPosts += m.post_count;
+  const allPosts = creator.tracked_post_count ?? 0;
 
   // All-time views = views earned in completed cycles + views earned in current cycle
   const allViews = (creator.completed_views_total ?? 0) + (creator.current_cycle_views ?? 0);

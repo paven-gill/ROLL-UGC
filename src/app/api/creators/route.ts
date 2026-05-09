@@ -10,12 +10,14 @@ export async function GET() {
     { data: payouts },
     { data: cycles },
     { data: snapshots },
+    { data: postRows },
   ] = await Promise.all([
     db.from("creators").select("*").order("name"),
     db.from("monthly_metrics").select("*").order("year", { ascending: false }).order("month", { ascending: false }),
     db.from("payout_cycles").select("creator_id, payout_amount, views_earned, status"),
     db.from("creator_cycles").select("creator_id, baseline_views"),
     db.from("view_snapshots").select("creator_id, platform, snapshot_date, cumulative_views").order("snapshot_date", { ascending: false }),
+    db.from("post_snapshots").select("creator_id"),
   ]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -56,6 +58,12 @@ export async function GET() {
     latestTotalByCreator.set(creatorId, (latestTotalByCreator.get(creatorId) ?? 0) + cumViews);
   });
 
+  // Count tracked posts per creator from post_snapshots (respects exclusions)
+  const postCountByCreator = new Map<string, number>();
+  for (const row of postRows ?? []) {
+    postCountByCreator.set(row.creator_id, (postCountByCreator.get(row.creator_id) ?? 0) + 1);
+  }
+
   const result = (creators ?? []).map(c => {
     const baseline = baselineByCreator.get(c.id) ?? 0;
     const latestTotal = latestTotalByCreator.get(c.id) ?? 0;
@@ -65,6 +73,7 @@ export async function GET() {
       completed_payout_total: payoutsByCreator.get(c.id)?.completed_payout_total ?? 0,
       completed_views_total:  payoutsByCreator.get(c.id)?.completed_views_total  ?? 0,
       current_cycle_views: Math.max(0, latestTotal - baseline),
+      tracked_post_count: postCountByCreator.get(c.id) ?? 0,
     };
   });
   return NextResponse.json(result);
