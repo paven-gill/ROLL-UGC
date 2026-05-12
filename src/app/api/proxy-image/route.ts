@@ -5,6 +5,7 @@ const ALLOWED_HOSTS = [
   "cdninstagram.com",
   "tiktokcdn.com",
   "tiktokcdn-us.com",
+  "tiktokcdn-eu.com",
 ];
 
 export async function GET(req: Request) {
