@@ -13,7 +13,6 @@ export async function GET(req: Request) {
   const [{ data: creators }, { data: snapshots }] = await Promise.all([
     db.from("creators")
       .select("id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views")
-      .eq("active", true)
       .order("name"),
     db.from("view_snapshots")
       .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")

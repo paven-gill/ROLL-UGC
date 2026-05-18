@@ -568,7 +568,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
         });
     } else {
       Promise.all(
-        creators.filter(c => c.active).map(c =>
+        creators.map(c =>
           fetch(`/api/posts/${c.id}`)
             .then(r => r.json())
             .then((data: PostRow[]) => ({
@@ -629,10 +629,9 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
   const displayCreatorPosts = filterPostsByRangeAndPlatform(creatorPosts).slice(0, 8);
 
   // Total Posts: counted from post_snapshots filtered by taken_at — accurate regardless of sync frequency
-  const activeCreators = filteredCreators.filter(c => c.active);
   const totalPosts = selectedCreatorId
     ? filterPostsByRangeAndPlatform(creatorPosts).length
-    : activeCreators.reduce((sum, c) => sum + filterPostsByRangeAndPlatform(allCreatorPosts.get(c.id) ?? []).length, 0);
+    : filteredCreators.reduce((sum, c) => sum + filterPostsByRangeAndPlatform(allCreatorPosts.get(c.id) ?? []).length, 0);
 
   const periodLabel =
     rangeType === "all"   ? "all time" :
@@ -801,7 +800,7 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
       ) : (
         /* ── All creators: one section per creator ── */
         <div className="space-y-6">
-          {[...filteredCreators].filter(c => c.active)
+          {[...filteredCreators].filter(c => c.status !== "finished")
             .sort((a, b) => {
               const aTop = (allCreatorPosts.get(a.id)?.[0]?.view_count_used ?? 0);
               const bTop = (allCreatorPosts.get(b.id)?.[0]?.view_count_used ?? 0);
@@ -875,7 +874,12 @@ function CreatorsTab({
       case "posts":     cmp = a.allPosts - b.allPosts; break;
       case "payout":    cmp = a.totalPayout - b.totalPayout; break;
       case "joined_at": cmp = (a.creator.joined_at ?? "").localeCompare(b.creator.joined_at ?? ""); break;
-      case "status":    cmp = (a.creator.active ? 0 : 1) - (b.creator.active ? 0 : 1); break;
+      case "status": {
+        const order = { active: 0, paused: 1, finished: 2 };
+        cmp = (order[a.creator.status ?? (a.creator.active ? "active" : "paused")] ?? 1) -
+              (order[b.creator.status ?? (b.creator.active ? "active" : "paused")] ?? 1);
+        break;
+      }
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
@@ -986,12 +990,15 @@ function CreatorsTab({
                     {/* Status */}
                     <td className="px-4 py-4">
                       <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium ${
-                        creator.active
-                          ? "bg-emerald-500/10 text-emerald-400"
-                          : "bg-yellow-500/10 text-yellow-400"
+                        creator.status === "active"   ? "bg-emerald-500/10 text-emerald-400" :
+                        creator.status === "finished" ? "bg-gray-500/10 text-gray-500" :
+                                                        "bg-yellow-500/10 text-yellow-400"
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${creator.active ? "bg-emerald-400" : "bg-yellow-400"}`}/>
-                        {creator.active ? "Active" : "Paused"}
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          creator.status === "active"   ? "bg-emerald-400" :
+                          creator.status === "finished" ? "bg-gray-600" : "bg-yellow-400"
+                        }`}/>
+                        {creator.status === "active" ? "Active" : creator.status === "finished" ? "Finished" : "Paused"}
                       </span>
                     </td>
 
@@ -1240,7 +1247,7 @@ export default function DashboardPage() {
         <div className="border-b border-white/[0.08] px-6 py-3.5 flex items-center justify-between shrink-0 bg-[#07070e]/70 backdrop-blur-2xl">
           <div>
             <h1 className="text-sm font-semibold text-white capitalize">{activeTab}</h1>
-            <p className="text-gray-700 text-xs">{creators.filter(c => c.active).length} active creators</p>
+            <p className="text-gray-700 text-xs">{creators.filter(c => c.status === "active").length} active creators</p>
           </div>
         </div>
 
