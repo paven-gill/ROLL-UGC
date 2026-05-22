@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { scrapeInstagram, scrapeTikTok, type ScrapedData } from "@/lib/apify";
+import { uploadTopTikTokThumbs } from "@/lib/thumbnail-storage";
 
 export const maxDuration = 300;
 
@@ -103,23 +104,28 @@ async function storeSnapshot(
       const { error: insertError } = await db.from("post_snapshots").insert(rows);
       if (insertError) console.error("[sync] post_snapshots insert error:", insertError);
       else console.log(`[sync] inserted ${rows.length} post_snapshots (${excludedIds.size} excluded)`);
+
+      if (platform === "tiktok") {
+        await uploadTopTikTokThumbs(db, creatorId, filteredPosts);
+      }
     } else {
       console.log(`[sync] all ${data.posts.length} posts excluded, skipping insert`);
     }
   }
 }
 
-// ─── Check and update the rolling 30-day cycle ───────────────────────────────
+// ─── Check and update the rolling cycle ──────────────────────────────────────
+// Closes the cycle when the creator hits their post target OR the end date passes.
 // Called after ALL platforms are synced so the total reflects both IG + TikTok.
 
 async function checkAndUpdateCycle(
   db: ReturnType<typeof createServerClient>,
-  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
+  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number; monthly_target?: number }
 ) {
   const today = new Date().toISOString().split("T")[0];
   const now = new Date().toISOString();
+  const monthly_target = creator.monthly_target ?? 30;
 
-  // Total eligible views across all platforms today
   const { data: todaySnaps } = await db
     .from("view_snapshots")
     .select("cumulative_views")
@@ -128,7 +134,6 @@ async function checkAndUpdateCycle(
 
   const totalViews = (todaySnaps ?? []).reduce((s, r) => s + (r.cumulative_views ?? 0), 0);
 
-  // Current cycle state
   const { data: cycle } = await db
     .from("creator_cycles")
     .select("*")
@@ -136,10 +141,9 @@ async function checkAndUpdateCycle(
     .single();
 
   if (!cycle) {
-    // ONBOARDING: first sync — set baseline and start the first 30-day cycle.
-    // Cycle starts on join date (not necessarily today — first sync may happen days later).
+    // ONBOARDING: first sync — set baseline and start the first cycle.
     const cycleStart = creator.joined_at ?? today;
-    const cycleEndDate = new Date(cycleStart);
+    const cycleEndDate = new Date(cycleStart + "T00:00:00Z");
     cycleEndDate.setDate(cycleEndDate.getDate() + 30);
     const cycleEnd = cycleEndDate.toISOString().split("T")[0];
 
@@ -158,8 +162,30 @@ async function checkAndUpdateCycle(
     return { action: "onboarded", baseline_views: totalViews, cycle_start: cycleStart, cycle_end: cycleEnd };
   }
 
-  if (today >= cycle.cycle_end_date) {
-    // CYCLE COMPLETE: close this cycle and immediately open the next one.
+  // Count posts in the current cycle window to check if target is hit
+  const { data: cyclePosts } = await db
+    .from("post_snapshots")
+    .select("taken_at")
+    .eq("creator_id", creator.id)
+    .gte("taken_at", cycle.cycle_start_date)
+    .lte("taken_at", today)
+    .order("taken_at", { ascending: true });
+
+  const cyclePostCount = (cyclePosts ?? []).length;
+  const targetHit = monthly_target > 0 && cyclePostCount >= monthly_target;
+  const dateExpired = today >= cycle.cycle_end_date;
+
+  if (targetHit || dateExpired) {
+    // Determine effective end date: use date of the target post if hit early
+    let effectiveEndDate: string;
+    if (targetHit) {
+      const targetPost = (cyclePosts ?? [])[monthly_target - 1];
+      effectiveEndDate = targetPost?.taken_at?.split("T")[0] ?? today;
+      if (effectiveEndDate > cycle.cycle_end_date) effectiveEndDate = cycle.cycle_end_date;
+    } else {
+      effectiveEndDate = cycle.cycle_end_date;
+    }
+
     const views_earned = Math.max(0, totalViews - cycle.baseline_views);
     const view_bonus = parseFloat(((views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2));
     const payout_amount = parseFloat((creator.base_fee + view_bonus).toFixed(2));
@@ -168,7 +194,7 @@ async function checkAndUpdateCycle(
       {
         creator_id: creator.id,
         cycle_start_date: cycle.cycle_start_date,
-        cycle_end_date: cycle.cycle_end_date,
+        cycle_end_date: effectiveEndDate,
         start_views: cycle.baseline_views,
         end_views: totalViews,
         views_earned,
@@ -181,27 +207,26 @@ async function checkAndUpdateCycle(
     );
 
     // Next cycle starts where this one ended
-    const nextEndDate = new Date(cycle.cycle_end_date);
+    const nextEndDate = new Date(effectiveEndDate + "T00:00:00Z");
     nextEndDate.setDate(nextEndDate.getDate() + 30);
-    const nextCycleEnd = nextEndDate.toISOString().split("T")[0];
 
     await db.from("creator_cycles").update({
-      cycle_start_date: cycle.cycle_end_date,
-      cycle_end_date: nextCycleEnd,
+      cycle_start_date: effectiveEndDate,
+      cycle_end_date: nextEndDate.toISOString().split("T")[0],
       baseline_views: totalViews,
       updated_at: now,
     }).eq("creator_id", creator.id);
 
-    console.log(`[cycle] closed ${creator.id}: earned=${views_earned}, payout=$${payout_amount}`);
-    return { action: "cycle_closed", views_earned, payout_amount };
+    const reason = targetHit ? "target_hit" : "date_expired";
+    console.log(`[cycle] closed ${creator.id}: earned=${views_earned}, payout=$${payout_amount}, reason=${reason}`);
+    return { action: "cycle_closed", views_earned, payout_amount, reason };
   }
 
-  // MID-CYCLE: no state change needed
   const views_so_far = Math.max(0, totalViews - cycle.baseline_views);
   const days_remaining = Math.ceil(
     (new Date(cycle.cycle_end_date).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24)
   );
-  return { action: "in_progress", views_so_far, days_remaining };
+  return { action: "in_progress", views_so_far, days_remaining, post_count: cyclePostCount };
 }
 
 // ─── POST /api/sync/[id] ──────────────────────────────────────────────────────

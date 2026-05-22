@@ -207,7 +207,12 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const [bulkDeleting,   setBulkDeleting]   = useState(false);
   const [editingCycle,   setEditingCycle]   = useState(false);
   const [cycleStartInput, setCycleStartInput] = useState("");
+  const [cycleEndInput,   setCycleEndInput]   = useState("");
   const [savingCycle,    setSavingCycle]    = useState(false);
+  const [editingHistoryCycleId, setEditingHistoryCycleId] = useState<string | null>(null);
+  const [historyCycleStartInput, setHistoryCycleStartInput] = useState("");
+  const [historyCycleEndInput,   setHistoryCycleEndInput]   = useState("");
+  const [savingHistoryCycle,     setSavingHistoryCycle]     = useState(false);
 
   const [paymentForm, setPaymentForm] = useState({
     base_fee: "", rate_per_thousand_views: "", affiliate_percentage: "",
@@ -260,9 +265,10 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   }
 
   async function savePayment() {
+    const rate = parseFloat(paymentForm.rate_per_thousand_views);
     await patch({
       base_fee: parseFloat(paymentForm.base_fee) || 0,
-      rate_per_thousand_views: parseFloat(paymentForm.rate_per_thousand_views) || 2,
+      rate_per_thousand_views: isNaN(rate) ? 2 : rate,
       affiliate_percentage: parseFloat(paymentForm.affiliate_percentage) || 0,
     });
   }
@@ -282,9 +288,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     });
   }
 
-  async function toggleStatus() {
-    if (!creator) return;
-    await patch({ active: !creator.active });
+  async function setCreatorStatus(newStatus: "active" | "paused" | "finished") {
+    await patch({ status: newStatus, active: newStatus === "active" });
   }
 
   async function deleteCreator() {
@@ -296,14 +301,29 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   async function saveCycleStart() {
     if (!cycleStartInput) return;
     setSavingCycle(true);
+    const body: Record<string, string> = { cycle_start_date: cycleStartInput };
+    if (cycleEndInput) body.cycle_end_date = cycleEndInput;
     await fetch(`/api/creators/${params.id}/cycles`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cycle_start_date: cycleStartInput }),
+      body: JSON.stringify(body),
     });
     setEditingCycle(false);
     await fetchCreator();
     setSavingCycle(false);
+  }
+
+  async function saveHistoryCycleDates(id: string) {
+    if (!historyCycleStartInput || !historyCycleEndInput) return;
+    setSavingHistoryCycle(true);
+    await fetch(`/api/payout-cycles/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cycle_start_date: historyCycleStartInput, cycle_end_date: historyCycleEndInput }),
+    });
+    setEditingHistoryCycleId(null);
+    await fetchCreator();
+    setSavingHistoryCycle(false);
   }
 
   async function excludePost(post: PostRow) {
@@ -399,12 +419,17 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
               <div className="flex items-center gap-2.5">
                 <h1 className="text-lg font-semibold">{creator.name}</h1>
                 <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium border ${
-                  creator.active
+                  creator.status === "active"
                     ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : creator.status === "finished"
+                    ? "bg-gray-500/10 text-gray-400 border-gray-500/20"
                     : "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
                 }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${creator.active ? "bg-emerald-400" : "bg-yellow-400"}`}/>
-                  {creator.active ? "Active" : "Paused"}
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    creator.status === "active" ? "bg-emerald-400" :
+                    creator.status === "finished" ? "bg-gray-500" : "bg-yellow-400"
+                  }`}/>
+                  {creator.status === "active" ? "Active" : creator.status === "finished" ? "Finished" : "Paused"}
                 </span>
               </div>
               <div className="flex items-center gap-3 mt-0.5 text-gray-600 text-xs">
@@ -427,17 +452,19 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                 {syncMsg}
               </span>
             )}
-            <button
-              onClick={toggleStatus}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors ${
-                creator.active
-                  ? "border-yellow-500/20 text-yellow-400 hover:bg-yellow-500/10"
-                  : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
-              }`}
-            >
-              {creator.active ? <Pause size={13}/> : <Play size={13}/>}
-              {creator.active ? "Pause" : "Activate"}
-            </button>
+            {creator.status !== "finished" && (
+              <button
+                onClick={() => setCreatorStatus(creator.status === "active" ? "paused" : "active")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+                  creator.status === "active"
+                    ? "border-yellow-500/20 text-yellow-400 hover:bg-yellow-500/10"
+                    : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
+                }`}
+              >
+                {creator.status === "active" ? <Pause size={13}/> : <Play size={13}/>}
+                {creator.status === "active" ? "Pause" : "Activate"}
+              </button>
+            )}
             <button
               onClick={sync}
               disabled={syncing}
@@ -635,20 +662,27 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                             <p className="text-gray-500 text-xs">Current Cycle</p>
                             {!editingCycle && (
                               <button
-                                onClick={() => { setCycleStartInput(ac.cycle_start_date); setEditingCycle(true); }}
+                                onClick={() => { setCycleStartInput(ac.cycle_start_date); setCycleEndInput(ac.cycle_end_date); setEditingCycle(true); }}
                                 className="text-gray-700 hover:text-gray-400 transition-colors"
-                                title="Adjust cycle start"
+                                title="Adjust cycle dates"
                               >
                                 <Pencil size={10}/>
                               </button>
                             )}
                           </div>
                           {editingCycle ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <input
                                 type="date"
                                 value={cycleStartInput}
                                 onChange={e => setCycleStartInput(e.target.value)}
+                                className="bg-white/[0.04] border border-white/[0.12] rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-emerald-500/60"
+                              />
+                              <span className="text-gray-600 text-xs">→</span>
+                              <input
+                                type="date"
+                                value={cycleEndInput}
+                                onChange={e => setCycleEndInput(e.target.value)}
                                 className="bg-white/[0.04] border border-white/[0.12] rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-emerald-500/60"
                               />
                               <button
@@ -668,6 +702,9 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                           ) : (
                             <p className="text-white text-sm font-medium">
                               {fmtShortDate(ac.cycle_start_date)} → {fmtShortDate(ac.cycle_end_date)}
+                              <span className="text-gray-500 font-normal ml-1.5">
+                                ({Math.round((new Date(ac.cycle_end_date + "T00:00:00").getTime() - new Date(ac.cycle_start_date + "T00:00:00").getTime()) / 86400000)} days)
+                              </span>
                             </p>
                           )}
                         </div>
@@ -733,7 +770,53 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                 {cycleData.cycleHistory.map(c => (
                   <tr key={c.id} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                     <td className="px-5 py-3 font-medium text-gray-300">
-                      {fmtShortDate(c.cycle_start_date)} → {fmtShortDate(c.cycle_end_date)}
+                      {c.status !== "in_progress" && editingHistoryCycleId === c.id ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <input
+                            type="date"
+                            value={historyCycleStartInput}
+                            onChange={e => setHistoryCycleStartInput(e.target.value)}
+                            className="bg-white/[0.04] border border-white/[0.12] rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-emerald-500/60"
+                          />
+                          <span className="text-gray-600 text-xs">→</span>
+                          <input
+                            type="date"
+                            value={historyCycleEndInput}
+                            onChange={e => setHistoryCycleEndInput(e.target.value)}
+                            className="bg-white/[0.04] border border-white/[0.12] rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-emerald-500/60"
+                          />
+                          <button
+                            onClick={() => saveHistoryCycleDates(c.id)}
+                            disabled={savingHistoryCycle}
+                            className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50 transition-colors"
+                          >
+                            <Check size={13}/>
+                          </button>
+                          <button
+                            onClick={() => setEditingHistoryCycleId(null)}
+                            className="text-gray-600 hover:text-white transition-colors"
+                          >
+                            <X size={13}/>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 group">
+                          <span>{fmtShortDate(c.cycle_start_date)} → {fmtShortDate(c.cycle_end_date)}</span>
+                          {c.status !== "in_progress" && (
+                            <button
+                              onClick={() => {
+                                setEditingHistoryCycleId(c.id);
+                                setHistoryCycleStartInput(c.cycle_start_date);
+                                setHistoryCycleEndInput(c.cycle_end_date);
+                              }}
+                              className="text-gray-700 hover:text-gray-400 opacity-0 group-hover:opacity-100 transition-all"
+                              title="Adjust cycle dates"
+                            >
+                              <Pencil size={10}/>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">{fmt(c.views_earned)}</td>
                     <td className="px-4 py-3 text-right">
@@ -848,17 +931,34 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
         {/* Danger Zone */}
         <div className="border border-red-900/20 rounded-xl p-5">
           <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={toggleStatus}
-              className={`flex items-center gap-2 text-sm px-4 py-2 rounded-lg border transition-colors ${
-                creator.active
-                  ? "border-yellow-900/40 text-yellow-400 hover:border-yellow-600/60"
-                  : "border-emerald-900/40 text-emerald-400 hover:border-emerald-600/60"
-              }`}
-            >
-              {creator.active ? <><Pause size={13}/> Pause Creator</> : <><Play size={13}/> Activate Creator</>}
-            </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            {creator.status === "finished" ? (
+              <button
+                onClick={() => setCreatorStatus("active")}
+                className="flex items-center gap-2 text-sm text-emerald-400 border border-emerald-900/40 hover:border-emerald-600/60 px-4 py-2 rounded-lg transition-colors"
+              >
+                <Play size={13}/> Reactivate Creator
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => setCreatorStatus(creator.status === "active" ? "paused" : "active")}
+                  className={`flex items-center gap-2 text-sm px-4 py-2 rounded-lg border transition-colors ${
+                    creator.status === "active"
+                      ? "border-yellow-900/40 text-yellow-400 hover:border-yellow-600/60"
+                      : "border-emerald-900/40 text-emerald-400 hover:border-emerald-600/60"
+                  }`}
+                >
+                  {creator.status === "active" ? <><Pause size={13}/> Pause Creator</> : <><Play size={13}/> Activate Creator</>}
+                </button>
+                <button
+                  onClick={() => { if (confirm(`Mark ${creator.name} as finished? Their data will be kept but they'll stop syncing.`)) setCreatorStatus("finished"); }}
+                  className="flex items-center gap-2 text-sm text-gray-400 border border-gray-800 hover:border-gray-600 px-4 py-2 rounded-lg transition-colors"
+                >
+                  <X size={13}/> Mark Finished
+                </button>
+              </>
+            )}
             <button
               onClick={deleteCreator}
               className="flex items-center gap-2 text-sm text-red-400 border border-red-900/30 hover:border-red-600/60 px-4 py-2 rounded-lg transition-colors"

@@ -108,7 +108,7 @@ export async function GET(
 }
 
 // PATCH /api/creators/[id]/cycles
-// Adjusts the active cycle start date. End date = start + 30 days.
+// Adjusts the active cycle start/end date. End date defaults to start + 30 days if not provided.
 // Baseline views are looked up from view_snapshots at the new start date.
 
 export async function PATCH(
@@ -117,15 +117,15 @@ export async function PATCH(
 ) {
   const db = createServerClient();
   const creatorId = params.id;
-  const { cycle_start_date } = await req.json() as { cycle_start_date: string };
+  const { cycle_start_date, cycle_end_date: customEndDate } = await req.json() as { cycle_start_date: string; cycle_end_date?: string };
 
   if (!cycle_start_date) {
     return NextResponse.json({ error: "cycle_start_date required" }, { status: 400 });
   }
 
-  // Compute new end date (start + 30 days)
+  // Use provided end date or default to start + 30 days
   const startMs = new Date(cycle_start_date + "T00:00:00Z").getTime();
-  const endDate = new Date(startMs + 30 * 86400000).toISOString().split("T")[0];
+  const endDate = customEndDate ?? new Date(startMs + 30 * 86400000).toISOString().split("T")[0];
 
   // Find baseline_views from the most recent view_snapshot on or before new start date
   const { data: snaps } = await db

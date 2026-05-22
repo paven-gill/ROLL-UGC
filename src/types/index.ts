@@ -8,6 +8,7 @@ export interface Creator {
   affiliate_percentage: number;
   monthly_target: number;
   active: boolean;
+  status: "active" | "paused" | "finished";
   joined_at: string; // "YYYY-MM-DD"
   created_at: string;
 }

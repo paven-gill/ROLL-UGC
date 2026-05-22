@@ -432,7 +432,7 @@ function PostGrid({ posts, tiktokUsername }: { posts: PostRow[]; tiktokUsername?
 
 // ─── Home tab ─────────────────────────────────────────────────────────────────
 
-function HomeTab({ creators }: { creators: CreatorRow[] }) {
+function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate: (id: string) => void }) {
   const now = new Date();
   const [rangeType, setRangeType] = useState<TimeRangeType>("30d");
   const [selYear,  setSelYear]  = useState(now.getFullYear());
@@ -812,7 +812,10 @@ function HomeTab({ creators }: { creators: CreatorRow[] }) {
               return (
                 <div key={creator.id}>
                   <div className="flex items-center gap-3 mb-3">
-                    <h2 className="text-sm font-semibold text-gray-200">{creator.name}</h2>
+                    <h2
+                      className="text-sm font-semibold text-gray-200 hover:text-white cursor-pointer hover:underline underline-offset-2 transition-colors"
+                      onClick={() => onNavigate(creator.id)}
+                    >{creator.name}</h2>
                     {creator.instagram_username && (
                       <span className="text-blue-400/60 text-xs flex items-center gap-1">
                         <Instagram size={10}/> @{creator.instagram_username}
@@ -1256,7 +1259,7 @@ export default function DashboardPage() {
           <div className="flex-1 flex items-center justify-center text-gray-700 text-sm">Loading...</div>
         ) : (
           <>
-            {activeTab === "home" && <HomeTab creators={creators} />}
+            {activeTab === "home" && <HomeTab creators={creators} onNavigate={(id) => router.push(`/creators/${id}`)} />}
             {activeTab === "creators" && (
               <CreatorsTab
                 creators={creators}
