@@ -45,24 +45,31 @@ export async function GET(
 
   let activeCycle = null;
   if (activeCycleRow) {
-    const viewsEarned = Math.max(0, currentTotalViews - (activeCycleRow.baseline_views ?? 0));
     const today = new Date().toISOString().split("T")[0];
+    const startDate = activeCycleRow.cycle_start_date;
     const endDate = activeCycleRow.cycle_end_date;
-    const daysRemaining = Math.max(0, Math.ceil(
+    const notStarted = today < startDate;
+    const viewsEarned = notStarted ? 0 : Math.max(0, currentTotalViews - (activeCycleRow.baseline_views ?? 0));
+    const daysRemaining = notStarted ? 0 : Math.max(0, Math.ceil(
       (new Date(endDate + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / 86400000
     ));
-    const postCount = (allPosts ?? []).filter(p =>
+    const daysUntilStart = notStarted ? Math.ceil(
+      (new Date(startDate + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / 86400000
+    ) : 0;
+    const postCount = notStarted ? 0 : (allPosts ?? []).filter(p =>
       p.taken_at &&
-      p.taken_at >= activeCycleRow.cycle_start_date &&
-      p.taken_at < activeCycleRow.cycle_end_date
+      p.taken_at >= startDate &&
+      p.taken_at < endDate
     ).length;
 
     activeCycle = {
-      cycle_start_date: activeCycleRow.cycle_start_date,
-      cycle_end_date: activeCycleRow.cycle_end_date,
+      cycle_start_date: startDate,
+      cycle_end_date: endDate,
       baseline_views: activeCycleRow.baseline_views,
       views_earned: viewsEarned,
       days_remaining: daysRemaining,
+      not_started: notStarted,
+      days_until_start: daysUntilStart,
       post_count: postCount,
     };
   }

@@ -19,6 +19,8 @@ interface ActiveCycle {
   baseline_views: number;
   views_earned: number;
   days_remaining: number;
+  not_started: boolean;
+  days_until_start: number;
   post_count: number;
 }
 
@@ -316,11 +318,19 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   async function saveHistoryCycleDates(id: string) {
     if (!historyCycleStartInput || !historyCycleEndInput) return;
     setSavingHistoryCycle(true);
-    await fetch(`/api/payout-cycles/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cycle_start_date: historyCycleStartInput, cycle_end_date: historyCycleEndInput }),
-    });
+    if (id === "active") {
+      await fetch(`/api/creators/${params.id}/cycles`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cycle_start_date: historyCycleStartInput, cycle_end_date: historyCycleEndInput }),
+      });
+    } else {
+      await fetch(`/api/payout-cycles/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cycle_start_date: historyCycleStartInput, cycle_end_date: historyCycleEndInput }),
+      });
+    }
     setEditingHistoryCycleId(null);
     await fetchCreator();
     setSavingHistoryCycle(false);
@@ -410,7 +420,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
           {/* Left */}
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push("/")}
+              onClick={() => router.back()}
               className="text-gray-500 hover:text-white transition-colors"
             >
               <ArrowLeft size={18}/>
@@ -709,37 +719,45 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                           )}
                         </div>
                         <div>
-                          <p className="text-gray-500 text-xs mb-1">Days Remaining</p>
-                          <p className="text-white text-sm font-medium">{ac.days_remaining} days</p>
+                          <p className="text-gray-500 text-xs mb-1">{ac.not_started ? "Starts In" : "Days Remaining"}</p>
+                          <p className="text-white text-sm font-medium">
+                            {ac.not_started ? `${ac.days_until_start} days` : `${ac.days_remaining} days`}
+                          </p>
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs mb-1">Last Synced</p>
                           <p className="text-white text-sm font-medium">{fmtDateTime(cycleData.lastSyncedAt)}</p>
                         </div>
                       </div>
-                      <div className="grid grid-cols-4 gap-4">
-                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
-                          <p className="text-gray-500 text-xs mb-1">Posts This Cycle</p>
-                          <p className="text-white text-sm font-semibold">
-                            <span className={ac.post_count >= monthly_target ? "text-emerald-400" : ""}>{ac.post_count}</span>
-                            <span className="text-gray-600 font-normal">/{monthly_target}</span>
-                          </p>
+                      {ac.not_started ? (
+                        <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg px-4 py-3 text-sm text-purple-300">
+                          Cycle hasn&apos;t started yet — sync on or after {fmtShortDate(ac.cycle_start_date)} to begin tracking.
                         </div>
-                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
-                          <p className="text-gray-500 text-xs mb-1">Views Earned</p>
-                          <p className="text-white text-sm font-semibold">{fmt(ac.views_earned)}</p>
+                      ) : (
+                        <div className="grid grid-cols-4 gap-4">
+                          <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
+                            <p className="text-gray-500 text-xs mb-1">Posts This Cycle</p>
+                            <p className="text-white text-sm font-semibold">
+                              <span className={ac.post_count >= monthly_target ? "text-emerald-400" : ""}>{ac.post_count}</span>
+                              <span className="text-gray-600 font-normal">/{monthly_target}</span>
+                            </p>
+                          </div>
+                          <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
+                            <p className="text-gray-500 text-xs mb-1">Views Earned</p>
+                            <p className="text-white text-sm font-semibold">{fmt(ac.views_earned)}</p>
+                          </div>
+                          <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
+                            <p className="text-gray-500 text-xs mb-1">View Bonus</p>
+                            <p className="text-white text-sm font-semibold">
+                              ${((ac.views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
+                            <p className="text-gray-500 text-xs mb-1">Projected Payout</p>
+                            <p className="text-emerald-400 text-sm font-semibold">${projectedPayout.toFixed(2)}</p>
+                          </div>
                         </div>
-                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
-                          <p className="text-gray-500 text-xs mb-1">View Bonus</p>
-                          <p className="text-white text-sm font-semibold">
-                            ${((ac.views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
-                          <p className="text-gray-500 text-xs mb-1">Projected Payout</p>
-                          <p className="text-emerald-400 text-sm font-semibold">${projectedPayout.toFixed(2)}</p>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </>
                 );
@@ -770,7 +788,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                 {cycleData.cycleHistory.map(c => (
                   <tr key={c.id} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                     <td className="px-5 py-3 font-medium text-gray-300">
-                      {c.status !== "in_progress" && editingHistoryCycleId === c.id ? (
+                      {editingHistoryCycleId === c.id ? (
                         <div className="flex items-center gap-2 flex-wrap">
                           <input
                             type="date"
@@ -800,21 +818,19 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2 group">
+                        <div className="flex items-center gap-2">
                           <span>{fmtShortDate(c.cycle_start_date)} → {fmtShortDate(c.cycle_end_date)}</span>
-                          {c.status !== "in_progress" && (
-                            <button
-                              onClick={() => {
-                                setEditingHistoryCycleId(c.id);
-                                setHistoryCycleStartInput(c.cycle_start_date);
-                                setHistoryCycleEndInput(c.cycle_end_date);
-                              }}
-                              className="text-gray-700 hover:text-gray-400 opacity-0 group-hover:opacity-100 transition-all"
-                              title="Adjust cycle dates"
-                            >
-                              <Pencil size={10}/>
-                            </button>
-                          )}
+                          <button
+                            onClick={() => {
+                              setEditingHistoryCycleId(c.id);
+                              setHistoryCycleStartInput(c.cycle_start_date);
+                              setHistoryCycleEndInput(c.cycle_end_date);
+                            }}
+                            className="text-gray-700 hover:text-gray-400 transition-colors"
+                            title="Adjust cycle dates"
+                          >
+                            <Pencil size={10}/>
+                          </button>
                         </div>
                       )}
                     </td>
@@ -824,7 +840,9 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                       <span className="text-gray-600">/{monthly_target}</span>
                     </td>
                     <td className="px-4 py-3 text-right text-emerald-400 font-medium">
-                      {c.status === "in_progress"
+                      {c.id === "active" && cycleData.activeCycle?.not_started
+                        ? <span className="text-gray-600">—</span>
+                        : c.status === "in_progress"
                         ? `$${(creator.base_fee + (c.views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2)}`
                         : c.payout_amount != null ? `$${c.payout_amount.toFixed(2)}` : <span className="text-gray-600">—</span>
                       }
@@ -833,11 +851,16 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                       <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium border ${
                         c.status === "paid"
                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          : c.id === "active" && cycleData.activeCycle?.not_started
+                          ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
                           : c.status === "in_progress"
                           ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
                           : "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
                       }`}>
-                        {c.status === "paid" ? "Paid" : c.status === "in_progress" ? "In Progress" : "Pending"}
+                        {c.status === "paid" ? "Paid"
+                          : c.id === "active" && cycleData.activeCycle?.not_started ? "Upcoming"
+                          : c.status === "in_progress" ? "In Progress"
+                          : "Pending"}
                       </span>
                     </td>
                   </tr>
