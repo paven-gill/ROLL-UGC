@@ -190,6 +190,23 @@ async function checkAndUpdateCycle(
     const view_bonus = parseFloat(((views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2));
     const payout_amount = parseFloat((creator.base_fee + view_bonus).toFixed(2));
 
+    // If a payout record already exists for this cycle start date and the end date hasn't
+    // passed, the cycle was manually re-activated — don't roll it over again.
+    const { data: existingPayout } = await db
+      .from("payout_cycles")
+      .select("id")
+      .eq("creator_id", creator.id)
+      .eq("cycle_start_date", cycle.cycle_start_date)
+      .maybeSingle();
+
+    if (existingPayout && !dateExpired) {
+      const days_remaining = Math.ceil(
+        (new Date(cycle.cycle_end_date).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24)
+      );
+      console.log(`[cycle] ${creator.id}: target hit but cycle was manually restored — holding until ${cycle.cycle_end_date}`);
+      return { action: "in_progress", views_so_far: views_earned, days_remaining, post_count: cyclePostCount };
+    }
+
     await db.from("payout_cycles").upsert(
       {
         creator_id: creator.id,

@@ -74,7 +74,9 @@ export async function GET(
     };
   }
 
-  const completedRows = (completedCycles ?? []).map(c => {
+  const completedRows = (completedCycles ?? [])
+    .filter(c => c.cycle_start_date !== activeCycleRow?.cycle_start_date)
+    .map(c => {
     const postCount = (allPosts ?? []).filter(p =>
       p.taken_at &&
       p.taken_at >= c.cycle_start_date &&

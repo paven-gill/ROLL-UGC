@@ -5,8 +5,9 @@ import { createServerClient } from "@/lib/supabase";
 // Body: { status?: "pending" | "paid", cycle_start_date?: string, cycle_end_date?: string }
 //
 // If editing dates (not a status change) and the new end date is still in the future,
-// the cycle is re-activated: creator_cycles is updated to these dates, any payout_cycles
-// that rolled over after this one are deleted, and this row is removed.
+// the cycle is re-activated: creator_cycles is updated to these dates and any payout_cycles
+// that rolled over after this one are deleted. The row itself is kept so the sync can detect
+// it was manually restored and avoid re-rolling before the end date passes.
 
 export async function PATCH(
   req: Request,
@@ -59,8 +60,7 @@ export async function PATCH(
       .eq("creator_id", existing.creator_id)
       .gt("cycle_start_date", existing.cycle_start_date);
 
-    // Delete this row — it's now the active cycle again
-    await db.from("payout_cycles").delete().eq("id", params.id);
+    // Keep this payout row — sync checks for its existence to avoid re-rolling the cycle.
 
     return NextResponse.json({
       ok: true,
