@@ -116,5 +116,8 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json([...completedRows, ...inProgress]);
+  const all = [...completedRows, ...inProgress].sort((a, b) =>
+    a.cycle_start_date.localeCompare(b.cycle_start_date)
+  );
+  return NextResponse.json(all);
 }
