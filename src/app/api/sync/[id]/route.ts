@@ -115,7 +115,7 @@ async function storeSnapshot(
 }
 
 // ─── Check and update the rolling cycle ──────────────────────────────────────
-// Closes the cycle when the creator hits their post target OR the end date passes.
+// Closes the cycle when the end date passes — post count never triggers a rollover.
 // Called after ALL platforms are synced so the total reflects both IG + TikTok.
 
 async function checkAndUpdateCycle(
@@ -124,7 +124,6 @@ async function checkAndUpdateCycle(
 ) {
   const today = new Date().toISOString().split("T")[0];
   const now = new Date().toISOString();
-  const monthly_target = creator.monthly_target ?? 30;
 
   const { data: todaySnaps } = await db
     .from("view_snapshots")
@@ -162,7 +161,7 @@ async function checkAndUpdateCycle(
     return { action: "onboarded", baseline_views: totalViews, cycle_start: cycleStart, cycle_end: cycleEnd };
   }
 
-  // Count posts in the current cycle window to check if target is hit
+  // Count posts in the current cycle window (for display only — post count never closes a cycle)
   const { data: cyclePosts } = await db
     .from("post_snapshots")
     .select("taken_at")
@@ -172,40 +171,13 @@ async function checkAndUpdateCycle(
     .order("taken_at", { ascending: true });
 
   const cyclePostCount = (cyclePosts ?? []).length;
-  const targetHit = monthly_target > 0 && cyclePostCount >= monthly_target;
   const dateExpired = today >= cycle.cycle_end_date;
 
-  if (targetHit || dateExpired) {
-    // Determine effective end date: use date of the target post if hit early
-    let effectiveEndDate: string;
-    if (targetHit) {
-      const targetPost = (cyclePosts ?? [])[monthly_target - 1];
-      effectiveEndDate = targetPost?.taken_at?.split("T")[0] ?? today;
-      if (effectiveEndDate > cycle.cycle_end_date) effectiveEndDate = cycle.cycle_end_date;
-    } else {
-      effectiveEndDate = cycle.cycle_end_date;
-    }
-
+  if (dateExpired) {
+    const effectiveEndDate = cycle.cycle_end_date;
     const views_earned = Math.max(0, totalViews - cycle.baseline_views);
     const view_bonus = parseFloat(((views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2));
     const payout_amount = parseFloat((creator.base_fee + view_bonus).toFixed(2));
-
-    // If a payout record already exists for this cycle start date and the end date hasn't
-    // passed, the cycle was manually re-activated — don't roll it over again.
-    const { data: existingPayout } = await db
-      .from("payout_cycles")
-      .select("id")
-      .eq("creator_id", creator.id)
-      .eq("cycle_start_date", cycle.cycle_start_date)
-      .maybeSingle();
-
-    if (existingPayout && !dateExpired) {
-      const days_remaining = Math.ceil(
-        (new Date(cycle.cycle_end_date).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      console.log(`[cycle] ${creator.id}: target hit but cycle was manually restored — holding until ${cycle.cycle_end_date}`);
-      return { action: "in_progress", views_so_far: views_earned, days_remaining, post_count: cyclePostCount };
-    }
 
     await db.from("payout_cycles").upsert(
       {
@@ -223,20 +195,21 @@ async function checkAndUpdateCycle(
       { onConflict: "creator_id,cycle_start_date" }
     );
 
-    // Next cycle starts where this one ended
-    const nextEndDate = new Date(effectiveEndDate + "T00:00:00Z");
+    // Next cycle starts the day after this one ended
+    const nextStartDate = new Date(effectiveEndDate + "T00:00:00Z");
+    nextStartDate.setDate(nextStartDate.getDate() + 1);
+    const nextEndDate = new Date(nextStartDate);
     nextEndDate.setDate(nextEndDate.getDate() + 30);
 
     await db.from("creator_cycles").update({
-      cycle_start_date: effectiveEndDate,
+      cycle_start_date: nextStartDate.toISOString().split("T")[0],
       cycle_end_date: nextEndDate.toISOString().split("T")[0],
       baseline_views: totalViews,
       updated_at: now,
     }).eq("creator_id", creator.id);
 
-    const reason = targetHit ? "target_hit" : "date_expired";
-    console.log(`[cycle] closed ${creator.id}: earned=${views_earned}, payout=$${payout_amount}, reason=${reason}`);
-    return { action: "cycle_closed", views_earned, payout_amount, reason };
+    console.log(`[cycle] closed ${creator.id}: earned=${views_earned}, payout=$${payout_amount}, reason=date_expired`);
+    return { action: "cycle_closed", views_earned, payout_amount, reason: "date_expired" };
   }
 
   const views_so_far = Math.max(0, totalViews - cycle.baseline_views);
