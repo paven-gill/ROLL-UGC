@@ -27,6 +27,7 @@ export async function GET(req: Request) {
   const [
     { data: completed },
     { data: activeCycles },
+    { data: allActiveCycles },
     { data: latestSnaps },
   ] = await Promise.all([
     // Completed cycles ending in this month
@@ -35,20 +36,22 @@ export async function GET(req: Request) {
       .gte("cycle_end_date", firstDay)
       .lt("cycle_end_date", nextFirstDay)
       .order("cycle_end_date"),
-    // Active cycles projected to end this month (in-progress estimates)
+    // Active cycles ending in this month (for in-progress estimates)
     db.from("creator_cycles")
       .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views)")
       .gte("cycle_end_date", firstDay)
       .lt("cycle_end_date", nextFirstDay),
+    // ALL active creators — regardless of which month their cycle ends in
+    db.from("creator_cycles").select("creator_id"),
     // Latest daily snapshot per creator+platform for current-views calculation
     db.from("view_snapshots")
       .select("creator_id, platform, cumulative_views, snapshot_date")
       .order("snapshot_date", { ascending: false }),
   ]);
 
-  // Active cycle always wins: if a creator has a live creator_cycles row ending this month,
-  // show that with current views — never show a stale payout_cycles row alongside it.
-  const activeCreatorIds = new Set((activeCycles ?? []).map(c => c.creator_id));
+  // Any creator with a live cycle is excluded from completed rows — their old payout_cycles
+  // row (which may end in a different month) must not show until the new cycle closes.
+  const allActiveCreatorIds = new Set((allActiveCycles ?? []).map(c => c.creator_id));
 
   // Helper: sum latest cumulative_views across all platforms for a creator
   function latestTotalViews(creatorId: string): number {
@@ -92,8 +95,8 @@ export async function GET(req: Request) {
       }];
     });
 
-  // Shape completed cycles — skip any creator that has an active cycle this month
-  const completedRows = (completed ?? []).filter(c => !activeCreatorIds.has(c.creator_id)).map(c => {
+  // Shape completed cycles — skip any creator that currently has an active cycle (any month)
+  const completedRows = (completed ?? []).filter(c => !allActiveCreatorIds.has(c.creator_id)).map(c => {
     const cr = c.creators as { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
     return {
       id: c.id as string,
