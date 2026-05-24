@@ -46,29 +46,13 @@ export async function GET(req: Request) {
       .order("snapshot_date", { ascending: false }),
   ]);
 
-  // Detect re-activated cycles: creator_cycles and payout_cycles share the same start date.
-  // These should show live in-progress data, not the stale completed row.
-  const activeStartByCreator = new Map<string, string>();
-  for (const ac of (activeCycles ?? [])) {
-    activeStartByCreator.set(ac.creator_id, ac.cycle_start_date);
-  }
-  const reactivatedCreatorIds = new Set<string>(
-    (completed ?? [])
-      .filter(c => activeStartByCreator.get(c.creator_id) === c.cycle_start_date)
-      .map(c => c.creator_id)
-  );
-
-  // IDs of creators that already have a COMPLETED (non-reactivated) cycle in this month
-  const completedCreatorIds = new Set(
-    (completed ?? [])
-      .filter(c => !reactivatedCreatorIds.has(c.creator_id))
-      .map(c => c.creator_id)
-  );
+  // Active cycle always wins: if a creator has a live creator_cycles row ending this month,
+  // show that with current views — never show a stale payout_cycles row alongside it.
+  const activeCreatorIds = new Set((activeCycles ?? []).map(c => c.creator_id));
 
   // Helper: sum latest cumulative_views across all platforms for a creator
   function latestTotalViews(creatorId: string): number {
     const snaps = (latestSnaps ?? []).filter(s => s.creator_id === creatorId);
-    // For each platform, take the most recent snapshot only
     const byPlatform = new Map<string, number>();
     for (const s of snaps) {
       if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
@@ -76,9 +60,8 @@ export async function GET(req: Request) {
     return Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
   }
 
-  // In-progress estimates (active cycles ending this month, not yet closed)
+  // In-progress estimates — all active cycles ending this month
   const inProgress = (activeCycles ?? [])
-    .filter(c => !completedCreatorIds.has(c.creator_id))
     .flatMap(cycle => {
       const cr = cycle.creators as {
         name: string; instagram_username: string | null; tiktok_username: string | null;
@@ -109,8 +92,8 @@ export async function GET(req: Request) {
       }];
     });
 
-  // Shape completed cycles — exclude re-activated ones (shown as in-progress instead)
-  const completedRows = (completed ?? []).filter(c => !reactivatedCreatorIds.has(c.creator_id)).map(c => {
+  // Shape completed cycles — skip any creator that has an active cycle this month
+  const completedRows = (completed ?? []).filter(c => !activeCreatorIds.has(c.creator_id)).map(c => {
     const cr = c.creators as { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
     return {
       id: c.id as string,
