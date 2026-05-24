@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Users, DollarSign, Zap,
   RefreshCw, Plus, Instagram, Music2,
@@ -1213,9 +1213,18 @@ function PayoutsTab() {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const now = new Date();
 
-  const [activeTab, setActiveTab] = useState<Tab>("home");
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = searchParams.get("tab");
+    return (t === "creators" || t === "payouts") ? t : "home";
+  });
+
+  function switchTab(tab: Tab) {
+    setActiveTab(tab);
+    router.replace(tab === "home" ? "/" : `/?tab=${tab}`, { scroll: false });
+  }
   const [creators, setCreators] = useState<CreatorRow[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [syncing,  setSyncing]  = useState<string | null>(null);
@@ -1243,7 +1252,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen text-white">
-      <Sidebar active={activeTab} onChange={setActiveTab} />
+      <Sidebar active={activeTab} onChange={switchTab} />
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top header bar */}
