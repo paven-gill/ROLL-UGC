@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Users, DollarSign, Zap,
@@ -1211,7 +1211,7 @@ function PayoutsTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+function DashboardInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const now = new Date();
@@ -1288,5 +1288,13 @@ export default function DashboardPage() {
         <AddCreatorModal onClose={() => setShowAdd(false)} onCreated={fetchCreators} />
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardInner />
+    </Suspense>
   );
 }
