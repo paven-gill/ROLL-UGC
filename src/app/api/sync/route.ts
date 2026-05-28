@@ -99,16 +99,15 @@ async function storeSnapshot(
   }
 }
 
-// ─── Check and update the rolling cycle ──────────────────────────────────────
-// Closes the cycle when the creator hits their post target OR the end date passes.
+// ─── Read cycle status only — sync never modifies creator_cycles ──────────────
+// The only exception is onboarding: if no cycle exists yet, create the first one.
+// All cycle transitions (rollovers, date changes) are managed manually via the UI.
 
-async function checkAndUpdateCycle(
+async function checkCycleStatus(
   db: ReturnType<typeof createServerClient>,
-  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number; monthly_target?: number }
+  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
 ) {
   const today = new Date().toISOString().split("T")[0];
-  const now = new Date().toISOString();
-  const monthly_target = creator.monthly_target ?? 30;
 
   const { data: todaySnaps } = await db
     .from("view_snapshots")
@@ -125,6 +124,7 @@ async function checkAndUpdateCycle(
     .single();
 
   if (!cycle) {
+    // Onboarding only — create the very first cycle and never touch it again via sync.
     const cycleStart = creator.joined_at ?? today;
     const cycleEndDate = new Date(cycleStart + "T00:00:00Z");
     cycleEndDate.setDate(cycleEndDate.getDate() + 30);
@@ -140,71 +140,16 @@ async function checkAndUpdateCycle(
     return { action: "onboarded", baseline_views: totalViews };
   }
 
-  // Count posts in the current cycle window to check if target is hit
-  const { data: cyclePosts } = await db
-    .from("post_snapshots")
-    .select("taken_at")
-    .eq("creator_id", creator.id)
-    .gte("taken_at", cycle.cycle_start_date)
-    .lte("taken_at", today)
-    .order("taken_at", { ascending: true });
-
-  const cyclePostCount = (cyclePosts ?? []).length;
-  const targetHit = monthly_target > 0 && cyclePostCount >= monthly_target;
+  const views_so_far = Math.max(0, totalViews - cycle.baseline_views);
   const dateExpired = today >= cycle.cycle_end_date;
-
-  if (targetHit || dateExpired) {
-    // Determine effective end date: use date of the target post if hit early
-    let effectiveEndDate: string;
-    if (targetHit) {
-      const targetPost = (cyclePosts ?? [])[monthly_target - 1];
-      effectiveEndDate = targetPost?.taken_at?.split("T")[0] ?? today;
-      if (effectiveEndDate > cycle.cycle_end_date) effectiveEndDate = cycle.cycle_end_date;
-    } else {
-      effectiveEndDate = cycle.cycle_end_date;
-    }
-
-    const views_earned = Math.max(0, totalViews - cycle.baseline_views);
-    const view_bonus = parseFloat(((views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2));
-    const payout_amount = parseFloat((creator.base_fee + view_bonus).toFixed(2));
-
-    await db.from("payout_cycles").upsert(
-      {
-        creator_id: creator.id,
-        cycle_start_date: cycle.cycle_start_date,
-        cycle_end_date: effectiveEndDate,
-        start_views: cycle.baseline_views,
-        end_views: totalViews,
-        views_earned,
-        base_fee: creator.base_fee,
-        view_bonus,
-        payout_amount,
-        status: "pending",
-      },
-      { onConflict: "creator_id,cycle_start_date" }
-    );
-
-    const nextEndDate = new Date(effectiveEndDate + "T00:00:00Z");
-    nextEndDate.setDate(nextEndDate.getDate() + 30);
-
-    await db.from("creator_cycles").update({
-      cycle_start_date: effectiveEndDate,
-      cycle_end_date: nextEndDate.toISOString().split("T")[0],
-      baseline_views: totalViews,
-      updated_at: now,
-    }).eq("creator_id", creator.id);
-
-    return { action: "cycle_closed", views_earned, payout_amount, reason: targetHit ? "target_hit" : "date_expired" };
-  }
-
-  return { action: "in_progress", views_so_far: Math.max(0, totalViews - cycle.baseline_views), post_count: cyclePostCount };
+  return { action: dateExpired ? "expired" : "in_progress", views_so_far };
 }
 
 // ─── Sync one creator (both platforms in parallel) ───────────────────────────
 
 async function syncCreator(
   db: ReturnType<typeof createServerClient>,
-  creator: { id: string; name: string; instagram_username?: string | null; tiktok_username?: string | null; joined_at: string | null; base_fee: number; rate_per_thousand_views: number; monthly_target?: number }
+  creator: { id: string; name: string; instagram_username?: string | null; tiktok_username?: string | null; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
 ) {
   const result: Record<string, unknown> = { name: creator.name };
 
@@ -232,7 +177,7 @@ async function syncCreator(
   }
 
   try {
-    result.cycle = await checkAndUpdateCycle(db, creator);
+    result.cycle = await checkCycleStatus(db, creator);
   } catch (e) { result.cycle_error = String(e); }
 
   return result;

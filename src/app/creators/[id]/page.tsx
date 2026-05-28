@@ -413,7 +413,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const allPosts = posts.length;
   const allViews = posts.reduce((s, p) => s + p.view_count_used, 0);
   const totalPaidOut = (cycleData?.cycleHistory ?? [])
-    .filter(c => c.status !== "in_progress")
+    .filter(c => c.status === "paid")
     .reduce((sum, c) => sum + (c.payout_amount ?? 0), 0);
   const monthly_target = creator.monthly_target ?? 30;
 
@@ -681,7 +681,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
               {/* Active cycle details */}
               {cycleData?.activeCycle && (() => {
                 const ac = cycleData.activeCycle!;
-                const projectedPayout = creator.base_fee + (ac.views_earned / 1000) * creator.rate_per_thousand_views;
+                const projectedPayout = (ac.views_earned / 1000) * creator.rate_per_thousand_views;
                 return (
                   <>
                     <div className="border-t border-white/[0.07] pt-4">
@@ -867,7 +867,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                       {c.id === "active" && cycleData.activeCycle?.not_started
                         ? <span className="text-gray-600">—</span>
                         : c.status === "in_progress"
-                        ? `$${(creator.base_fee + (c.views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2)}`
+                        ? `$${((c.views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2)}`
                         : c.payout_amount != null ? `$${c.payout_amount.toFixed(2)}` : <span className="text-gray-600">—</span>
                       }
                     </td>

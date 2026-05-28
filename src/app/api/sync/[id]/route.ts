@@ -114,16 +114,15 @@ async function storeSnapshot(
   }
 }
 
-// ─── Check and update the rolling cycle ──────────────────────────────────────
-// Closes the cycle when the end date passes — post count never triggers a rollover.
-// Called after ALL platforms are synced so the total reflects both IG + TikTok.
+// ─── Read cycle status only — sync never modifies creator_cycles ──────────────
+// The only exception is onboarding: if no cycle exists yet, create the first one.
+// All cycle transitions (rollovers, date changes) are managed manually via the UI.
 
-async function checkAndUpdateCycle(
+async function checkCycleStatus(
   db: ReturnType<typeof createServerClient>,
-  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number; monthly_target?: number }
+  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
 ) {
   const today = new Date().toISOString().split("T")[0];
-  const now = new Date().toISOString();
 
   const { data: todaySnaps } = await db
     .from("view_snapshots")
@@ -140,7 +139,7 @@ async function checkAndUpdateCycle(
     .single();
 
   if (!cycle) {
-    // ONBOARDING: first sync — set baseline and start the first cycle.
+    // Onboarding only — create the very first cycle and never touch it again via sync.
     const cycleStart = creator.joined_at ?? today;
     const cycleEndDate = new Date(cycleStart + "T00:00:00Z");
     cycleEndDate.setDate(cycleEndDate.getDate() + 30);
@@ -161,62 +160,10 @@ async function checkAndUpdateCycle(
     return { action: "onboarded", baseline_views: totalViews, cycle_start: cycleStart, cycle_end: cycleEnd };
   }
 
-  // Count posts in the current cycle window (for display only — post count never closes a cycle)
-  const { data: cyclePosts } = await db
-    .from("post_snapshots")
-    .select("taken_at")
-    .eq("creator_id", creator.id)
-    .gte("taken_at", cycle.cycle_start_date)
-    .lte("taken_at", today)
-    .order("taken_at", { ascending: true });
-
-  const cyclePostCount = (cyclePosts ?? []).length;
-  const dateExpired = today >= cycle.cycle_end_date;
-
-  if (dateExpired) {
-    const effectiveEndDate = cycle.cycle_end_date;
-    const views_earned = Math.max(0, totalViews - cycle.baseline_views);
-    const view_bonus = parseFloat(((views_earned / 1000) * creator.rate_per_thousand_views).toFixed(2));
-    const payout_amount = parseFloat((creator.base_fee + view_bonus).toFixed(2));
-
-    await db.from("payout_cycles").upsert(
-      {
-        creator_id: creator.id,
-        cycle_start_date: cycle.cycle_start_date,
-        cycle_end_date: effectiveEndDate,
-        start_views: cycle.baseline_views,
-        end_views: totalViews,
-        views_earned,
-        base_fee: creator.base_fee,
-        view_bonus,
-        payout_amount,
-        status: "pending",
-      },
-      { onConflict: "creator_id,cycle_start_date" }
-    );
-
-    // Next cycle starts the day after this one ended
-    const nextStartDate = new Date(effectiveEndDate + "T00:00:00Z");
-    nextStartDate.setDate(nextStartDate.getDate() + 1);
-    const nextEndDate = new Date(nextStartDate);
-    nextEndDate.setDate(nextEndDate.getDate() + 30);
-
-    await db.from("creator_cycles").update({
-      cycle_start_date: nextStartDate.toISOString().split("T")[0],
-      cycle_end_date: nextEndDate.toISOString().split("T")[0],
-      baseline_views: totalViews,
-      updated_at: now,
-    }).eq("creator_id", creator.id);
-
-    console.log(`[cycle] closed ${creator.id}: earned=${views_earned}, payout=$${payout_amount}, reason=date_expired`);
-    return { action: "cycle_closed", views_earned, payout_amount, reason: "date_expired" };
-  }
-
   const views_so_far = Math.max(0, totalViews - cycle.baseline_views);
-  const days_remaining = Math.ceil(
-    (new Date(cycle.cycle_end_date).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24)
-  );
-  return { action: "in_progress", views_so_far, days_remaining, post_count: cyclePostCount };
+  const dateExpired = today >= cycle.cycle_end_date;
+  console.log(`[cycle] ${creator.id}: views_so_far=${views_so_far}, expired=${dateExpired}`);
+  return { action: dateExpired ? "expired" : "in_progress", views_so_far };
 }
 
 // ─── POST /api/sync/[id] ──────────────────────────────────────────────────────
@@ -261,12 +208,11 @@ export async function POST(
     }
   }
 
-  // After ALL platforms are synced: check/update the rolling 30-day cycle.
-  // This uses the combined total across all platforms from today's snapshots.
+  // After ALL platforms are synced: check cycle status (read-only — never modifies cycles).
   try {
-    result.cycle = await checkAndUpdateCycle(db, creator);
+    result.cycle = await checkCycleStatus(db, creator);
   } catch (e) {
-    console.error("[sync] Cycle update error:", e);
+    console.error("[sync] Cycle status error:", e);
     result.cycle_error = String(e);
   }
 

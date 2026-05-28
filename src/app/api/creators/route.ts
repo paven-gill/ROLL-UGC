@@ -28,10 +28,10 @@ export async function GET() {
     metricsByCreator.get(m.creator_id)!.push(m);
   }
 
-  // Sum closed cycle payouts per creator (exclude in_progress rows)
+  // Sum paid cycle payouts per creator (only status === "paid")
   const payoutsByCreator = new Map<string, { completed_payout_total: number; completed_views_total: number }>();
   for (const p of payouts ?? []) {
-    if (p.status === "in_progress") continue;
+    if (p.status !== "paid") continue;
     const existing = payoutsByCreator.get(p.creator_id) ?? { completed_payout_total: 0, completed_views_total: 0 };
     existing.completed_payout_total += p.payout_amount ?? 0;
     existing.completed_views_total  += p.views_earned  ?? 0;
