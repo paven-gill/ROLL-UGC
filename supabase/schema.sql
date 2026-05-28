@@ -106,6 +106,14 @@ CREATE TABLE excluded_posts (
   PRIMARY KEY (post_id, creator_id, platform)
 );
 
+-- ─── App settings (API keys, config) ────────────────────────────────────────
+
+CREATE TABLE app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ─── Security ─────────────────────────────────────────────────────────────────
 
 ALTER TABLE creators ENABLE ROW LEVEL SECURITY;
@@ -122,3 +130,5 @@ CREATE POLICY "service_role_all" ON payout_cycles FOR ALL USING (true);
 CREATE POLICY "service_role_all" ON post_snapshots FOR ALL USING (true);
 CREATE POLICY "service_role_all" ON monthly_metrics FOR ALL USING (true);
 CREATE POLICY "service_role_all" ON excluded_posts FOR ALL USING (true);
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_all" ON app_settings FOR ALL USING (true);

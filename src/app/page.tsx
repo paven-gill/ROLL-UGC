@@ -7,6 +7,7 @@ import {
   RefreshCw, Plus, Instagram, Music2,
   Eye, FileVideo, TrendingUp, ChevronRight, ChevronDown, CalendarDays,
   ArrowUpDown, Pencil, Heart, MessageCircle, CheckCircle2, Clock,
+  Wallet, Building2,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -15,9 +16,10 @@ import {
 } from "recharts";
 import AddCreatorModal from "@/components/AddCreatorModal";
 import QuickEditModal from "@/components/QuickEditModal";
+import PayCycleModal, { type CycleForPay } from "@/components/PayCycleModal";
 import type { Creator, MonthlyMetrics } from "@/types";
 
-type Tab = "home" | "creators" | "payouts";
+type Tab = "home" | "creators" | "payouts" | "finance";
 type TimeRangeType = "7d" | "14d" | "30d" | "month" | "all";
 
 interface CreatorRow extends Creator {
@@ -135,6 +137,7 @@ const NAV: NavItem[] = [
   { id: "home",     label: "Home",     Icon: LayoutDashboard },
   { id: "creators", label: "Creators", Icon: Users },
   { id: "payouts",  label: "Payouts",  Icon: DollarSign },
+  { id: "finance",  label: "Finance",  Icon: Wallet },
 ];
 
 function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
@@ -1049,32 +1052,21 @@ function CreatorsTab({
 
 function PayoutsTab() {
   const now = new Date();
-  const [selYear,  setSelYear]  = useState(now.getFullYear());
-  const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
-  const [cycles,   setCycles]   = useState<CycleRecord[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const [marking,  setMarking]  = useState<string | null>(null);
+  const today = now.toISOString().split("T")[0];
+  const [selYear,  setSelYear]   = useState(now.getFullYear());
+  const [selMonth, setSelMonth]  = useState(now.getMonth() + 1);
+  const [cycles,   setCycles]    = useState<CycleRecord[]>([]);
+  const [fetching, setFetching]  = useState(false);
+  const [payingCycle, setPayingCycle] = useState<CycleForPay | null>(null);
 
-  useEffect(() => {
+  function loadCycles() {
     setFetching(true);
     fetch(`/api/dashboard/cycles?year=${selYear}&month=${selMonth}`)
       .then(r => r.json())
-      .then(data => {
-        setCycles(Array.isArray(data) ? data : []);
-        setFetching(false);
-      });
-  }, [selYear, selMonth]);
-
-  async function handleMarkPaid(cycleId: string) {
-    setMarking(cycleId);
-    await fetch(`/api/payout-cycles/${cycleId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "paid" }),
-    });
-    setCycles(prev => prev.map(c => c.id === cycleId ? { ...c, status: "paid" as const } : c));
-    setMarking(null);
+      .then(data => { setCycles(Array.isArray(data) ? data : []); setFetching(false); });
   }
+
+  useEffect(() => { loadCycles(); }, [selYear, selMonth]);
 
   function handleMonthSelect(_type: TimeRangeType, year?: number, month?: number) {
     if (year  !== undefined) setSelYear(year);
@@ -1122,8 +1114,7 @@ function PayoutsTab() {
                   <th className="text-right px-4 py-3 text-xs text-gray-500">Base Fee</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">View Bonus</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">Total</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-500">Status</th>
-                  <th className="px-4 py-3" />
+                  <th className="text-right px-5 py-3 text-xs text-gray-500">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -1152,35 +1143,23 @@ function PayoutsTab() {
                     <td className="px-4 py-3.5 text-right text-gray-400 tabular-nums">${cycle.view_bonus.toFixed(2)}</td>
                     {/* Total */}
                     <td className="px-4 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">${cycle.payout_amount.toFixed(2)}</td>
-                    {/* Status */}
-                    <td className="px-4 py-3.5">
-                      {cycle.status === "paid" && (
+                    {/* Status / Pay */}
+                    <td className="px-5 py-3.5 text-right">
+                      {(cycle.status === "pending" || (cycle.status === "in_progress" && cycle.cycle_end_date < today)) ? (
+                        <button
+                          onClick={() => setPayingCycle(cycle as CycleForPay)}
+                          className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors"
+                        >
+                          <CheckCircle2 size={11} /> Pay
+                        </button>
+                      ) : cycle.status === "paid" ? (
                         <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium bg-emerald-500/10 text-emerald-400">
                           <CheckCircle2 size={10} /> Paid
                         </span>
-                      )}
-                      {cycle.status === "pending" && (
-                        <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium bg-yellow-500/10 text-yellow-400">
-                          <Clock size={10} /> Pending
-                        </span>
-                      )}
-                      {cycle.status === "in_progress" && (
+                      ) : (
                         <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium bg-gray-500/10 text-gray-500">
                           <TrendingUp size={10} /> In Progress
                         </span>
-                      )}
-                    </td>
-                    {/* Mark Paid */}
-                    <td className="px-4 py-3.5">
-                      {cycle.status === "pending" && (
-                        <button
-                          onClick={() => handleMarkPaid(cycle.id)}
-                          disabled={marking === cycle.id}
-                          className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors disabled:opacity-50"
-                        >
-                          <CheckCircle2 size={11} />
-                          {marking === cycle.id ? "..." : "Mark Paid"}
-                        </button>
                       )}
                     </td>
                   </tr>
@@ -1195,16 +1174,281 @@ function PayoutsTab() {
                     {fmt(grandViews)}
                   </td>
                   <td colSpan={2} />
-                  <td className="px-4 py-3.5 text-right font-bold text-emerald-400 tabular-nums">
+                  <td className="px-5 py-3.5 text-right font-bold text-emerald-400 tabular-nums">
                     {fmtMoney(grandTotal)}
                   </td>
-                  <td colSpan={2} />
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
         )}
       </div>
+
+      {payingCycle && (
+        <PayCycleModal
+          cycle={payingCycle}
+          onClose={() => setPayingCycle(null)}
+          onPaid={() => { setPayingCycle(null); loadCycles(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Finance tab ─────────────────────────────────────────────────────────────
+
+interface WiseBalance {
+  id: number;
+  currency: string;
+  name: string;
+  amount: { value: number; currency: string };
+}
+
+interface WiseData {
+  profile: { id: number; type: string; name: string };
+  balances: WiseBalance[];
+}
+
+interface PaidCycle {
+  id: string;
+  cycle_start_date: string;
+  cycle_end_date: string;
+  payout_amount: number;
+  base_fee: number;
+  view_bonus: number;
+  views_earned: number;
+  status: string;
+  creators: { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
+}
+
+function FinanceTab() {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<WiseData | null>(null);
+  const [notConfigured, setNotConfigured] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [token, setToken] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [paidCycles, setPaidCycles] = useState<PaidCycle[]>([]);
+
+  function fetchBalance() {
+    setLoading(true);
+    fetch("/api/wise/balance")
+      .then(r => r.json())
+      .then(d => {
+        if (d.error === "not_configured") { setNotConfigured(true); setData(null); }
+        else if (d.error === "wise_auth_failed") { setNotConfigured(true); setConnectError("Token rejected by Wise — please check it and try again."); setData(null); }
+        else if (d.error) { setNotConfigured(true); setConnectError("Could not reach Wise. Check your connection."); setData(null); }
+        else { setData(d); setNotConfigured(false); }
+        setLoading(false);
+      })
+      .catch(() => { setNotConfigured(true); setLoading(false); });
+  }
+
+  useEffect(() => {
+    fetchBalance();
+    fetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
+  }, []);
+
+  async function handleConnect() {
+    if (!token.trim()) return;
+    setConnecting(true);
+    setConnectError(null);
+    const res = await fetch("/api/wise/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token.trim() }),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      setConnectError(
+        d.error === "invalid_token" ? "Invalid token — Wise rejected it. Double-check and try again." :
+        d.error === "wise_unreachable" ? "Could not reach Wise. Check your connection." :
+        "Something went wrong. Try again."
+      );
+      setConnecting(false);
+      return;
+    }
+    setToken("");
+    setConnecting(false);
+    fetchBalance();
+  }
+
+  async function handleDisconnect() {
+    setDisconnecting(true);
+    await fetch("/api/wise/settings", { method: "DELETE" });
+    setData(null);
+    setNotConfigured(true);
+    setDisconnecting(false);
+  }
+
+  return (
+    <div className="p-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Wise Account</h2>
+          <p className="text-xs text-gray-600 mt-0.5">Payment balance &amp; configuration</p>
+        </div>
+        {data && (
+          <button
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+            className="text-xs text-gray-600 hover:text-red-400 transition-colors disabled:opacity-40"
+          >
+            {disconnecting ? "Disconnecting…" : "Disconnect"}
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
+          Connecting to Wise…
+        </div>
+
+      ) : notConfigured ? (
+        /* ── Connect form ── */
+        <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-white/[0.04] rounded-lg flex items-center justify-center shrink-0">
+              <Building2 size={15} className="text-gray-500" />
+            </div>
+            <div>
+              <p className="text-white text-sm font-medium">Connect your Wise account</p>
+              <p className="text-gray-600 text-xs mt-0.5">
+                Get your API token from{" "}
+                <span className="text-gray-400">wise.com → Settings → API tokens</span>
+              </p>
+            </div>
+          </div>
+
+          {connectError && (
+            <p className="text-red-400 text-xs px-1">{connectError}</p>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleConnect()}
+              placeholder="Paste your Wise API token…"
+              className="flex-1 bg-white/[0.04] border border-white/[0.1] focus:border-emerald-500/40 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+            />
+            <button
+              onClick={handleConnect}
+              disabled={connecting || !token.trim()}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)]"
+            >
+              {connecting ? "Connecting…" : "Connect"}
+            </button>
+          </div>
+        </div>
+
+      ) : data ? (
+        <>
+          {/* Account card */}
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-5 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-emerald-500/10 rounded-lg flex items-center justify-center shrink-0">
+                <Building2 size={15} className="text-emerald-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{data.profile.name}</p>
+                <p className="text-gray-600 text-xs">
+                  {data.profile.type?.toLowerCase() === "business" ? "Business Account" : "Personal Account"} · Wise
+                </p>
+              </div>
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Connected
+              </span>
+            </div>
+          </div>
+
+          {/* Balances — always show, even at $0 */}
+          <div>
+            <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-3">Balances</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {data.balances.length === 0 ? (
+                /* Account exists but no balance objects returned — show $0 placeholder */
+                <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
+                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">AUD</p>
+                  <p className="text-white text-2xl font-bold">A$0.00</p>
+                </div>
+              ) : (
+                data.balances.map(b => (
+                  <div
+                    key={b.id}
+                    className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]"
+                  >
+                    <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">{b.currency}</p>
+                    <p className="text-white text-2xl font-bold">
+                      {new Intl.NumberFormat("en-AU", {
+                        style: "currency",
+                        currency: b.currency,
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      }).format(b.amount.value)}
+                    </p>
+                    {b.name && <p className="text-gray-700 text-xs mt-1">{b.name}</p>}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Dashboard payout history */}
+          <div>
+            <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-3">Paid via Dashboard</p>
+            {paidCycles.length === 0 ? (
+              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
+                No completed payouts yet.
+              </div>
+            ) : (
+              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/[0.07]">
+                      <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
+                      <th className="text-left px-4 py-3 text-xs text-gray-500">Period</th>
+                      <th className="text-right px-4 py-3 text-xs text-gray-500">Views</th>
+                      <th className="text-right px-5 py-3 text-xs text-gray-500">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paidCycles.map(c => (
+                      <tr key={c.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                        <td className="px-5 py-3.5">
+                          <p className="text-white font-medium text-sm">{c.creators?.name ?? "—"}</p>
+                        </td>
+                        <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
+                          {new Date(c.cycle_start_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric" })}
+                          {" → "}
+                          {new Date(c.cycle_end_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })}
+                        </td>
+                        <td className="px-4 py-3.5 text-right text-gray-400 text-xs tabular-nums">{fmt(c.views_earned)}</td>
+                        <td className="px-5 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
+                          {fmtMoney(c.payout_amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-white/[0.07] bg-white/[0.02]">
+                      <td colSpan={3} className="px-5 py-3 text-xs text-gray-500">Total paid</td>
+                      <td className="px-5 py-3 text-right font-bold text-emerald-400 tabular-nums">
+                        {fmtMoney(paidCycles.reduce((s, c) => s + c.payout_amount, 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1218,7 +1462,7 @@ function DashboardInner() {
 
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const t = searchParams.get("tab");
-    return (t === "creators" || t === "payouts") ? t : "home";
+    return (t === "creators" || t === "payouts" || t === "finance") ? t : "home";
   });
 
   function switchTab(tab: Tab) {
@@ -1280,6 +1524,7 @@ function DashboardInner() {
               />
             )}
             {activeTab === "payouts" && <PayoutsTab />}
+            {activeTab === "finance" && <FinanceTab />}
           </>
         )}
       </div>

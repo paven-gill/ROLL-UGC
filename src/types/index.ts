@@ -11,6 +11,8 @@ export interface Creator {
   status: "active" | "paused" | "finished";
   joined_at: string; // "YYYY-MM-DD"
   created_at: string;
+  wise_email: string | null;
+  wise_tag: string | null;
 }
 
 export interface MonthlyMetrics {

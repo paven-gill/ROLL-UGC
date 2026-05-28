@@ -218,6 +218,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
   const [paymentForm, setPaymentForm] = useState({
     base_fee: "", rate_per_thousand_views: "", affiliate_percentage: "",
+    wise_email: "", wise_tag: "",
   });
   const [socialsForm, setSocialsForm] = useState({ instagram_username: "", tiktok_username: "" });
   const [programForm, setProgramForm] = useState({
@@ -243,6 +244,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
       base_fee: String(data.base_fee),
       rate_per_thousand_views: String(data.rate_per_thousand_views),
       affiliate_percentage: String(data.affiliate_percentage ?? 0),
+      wise_email: data.wise_email ?? "",
+      wise_tag: data.wise_tag ?? "",
     });
     setSocialsForm({ instagram_username: data.instagram_username || "", tiktok_username: data.tiktok_username || "" });
     setProgramForm({
@@ -272,6 +275,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
       base_fee: parseFloat(paymentForm.base_fee) || 0,
       rate_per_thousand_views: isNaN(rate) ? 2 : rate,
       affiliate_percentage: parseFloat(paymentForm.affiliate_percentage) || 0,
+      wise_email: paymentForm.wise_email.trim() || null,
+      wise_tag: paymentForm.wise_tag.trim().replace(/^@/, "") || null,
     });
   }
 
@@ -545,12 +550,31 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                   onChange={v => setPaymentForm(f => ({ ...f, affiliate_percentage: v }))}
                   type="number"
                 />
+                <div className="pt-1 border-t border-white/[0.06]">
+                  <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-2.5">Wise Details</p>
+                  <div className="space-y-3">
+                    <Field
+                      label="Wise Email"
+                      value={paymentForm.wise_email}
+                      onChange={v => setPaymentForm(f => ({ ...f, wise_email: v }))}
+                      placeholder="creator@email.com"
+                      type="email"
+                    />
+                    <Field
+                      label="Wise Tag"
+                      value={paymentForm.wise_tag}
+                      onChange={v => setPaymentForm(f => ({ ...f, wise_tag: v }))}
+                      placeholder="@username"
+                    />
+                  </div>
+                </div>
               </div>
             ) : (
               <>
                 <InfoRow label="Base Fee"    value={`$${creator.base_fee.toFixed(2)} / month`} />
                 <InfoRow label="View Rate"   value={`$${creator.rate_per_thousand_views} / 1K views`} />
                 <InfoRow label="Affiliate %" value={`${creator.affiliate_percentage ?? 0}%`} />
+                <InfoRow label="Wise"        value={creator.wise_email ?? "—"} />
               </>
             )}
           </SectionCard>
