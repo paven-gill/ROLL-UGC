@@ -516,40 +516,20 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
       return;
     }
     setStatsLoading(true);
-    if (rangeType === "month") {
-      fetch(`/api/dashboard/cycles?year=${selYear}&month=${selMonth}`)
-        .then(r => r.json())
-        .then((cycles: CycleRecord[]) => {
-          const byCreator = new Map<string, RangeSummary>();
-          for (const c of (Array.isArray(cycles) ? cycles : [])) {
-            // Base fee only counts when the cycle is complete (pending/paid), not while in-progress
-            const contribution = c.status === "in_progress" ? c.view_bonus : c.payout_amount;
-            const existing = byCreator.get(c.creator_id);
-            if (existing) {
-              existing.total_views += c.views_earned;
-              existing.payout += contribution;
-            } else {
-              byCreator.set(c.creator_id, {
-                id: c.creator_id, name: c.creator_name,
-                instagram_username: c.instagram_username, tiktok_username: c.tiktok_username,
-                ig_views: 0, tt_views: 0, total_views: c.views_earned,
-                ig_posts: 0, tt_posts: 0, total_posts: 0, payout: contribution,
-              });
-            }
-          }
-          setSummaries(Array.from(byCreator.values()));
-          setStatsLoading(false);
-        });
-    } else {
-      const days = rangeType === "7d" ? 7 : rangeType === "14d" ? 14 : 30;
-      fetch(`/api/dashboard/range?days=${days}`)
-        .then(r => r.json())
-        .then(res => {
-          setSummaries(Array.isArray(res.results) ? res.results : []);
-          setRangeApprox(!res.windowAccurate);
-          setStatsLoading(false);
-        });
-    }
+    // Both month and rolling windows use the range API, which buckets views by
+    // the calendar window via cumulative-snapshot deltas — keeping the stat cards
+    // consistent with the Views-Over-Time chart. (The cycles API buckets views by
+    // cycle-end-date, which misfiled a month's views; it stays on the Payouts tab.)
+    const rangeUrl = rangeType === "month"
+      ? `/api/dashboard/range?year=${selYear}&month=${selMonth}`
+      : `/api/dashboard/range?days=${rangeType === "7d" ? 7 : rangeType === "14d" ? 14 : 30}`;
+    fetch(rangeUrl)
+      .then(r => r.json())
+      .then(res => {
+        setSummaries(Array.isArray(res.results) ? res.results : []);
+        setRangeApprox(!res.windowAccurate);
+        setStatsLoading(false);
+      });
   }, [rangeType, selYear, selMonth, creators]);
 
   function handleRangeSelect(type: TimeRangeType, year?: number, month?: number) {

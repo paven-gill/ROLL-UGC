@@ -28,18 +28,32 @@ export async function GET(req: Request) {
 
   if (creatorId) q = q.eq("creator_id", creatorId);
 
-  const { data } = await q;
+  const [{ data }, { data: activeCycles }] = await Promise.all([
+    q,
+    db.from("creator_cycles").select("creator_id, cycle_start_date"),
+  ]);
 
-  const events = (data ?? []).map(c => {
-    const cr = (c.creators as unknown) as { name: string } | null;
-    return {
-      date: c.cycle_end_date as string,
-      creator_name: cr?.name ?? "Unknown",
-      cycle_start_date: c.cycle_start_date as string,
-      cycle_end_date: c.cycle_end_date as string,
-      base_fee: c.base_fee as number,
-    };
-  });
+  // A payout_cycles row whose start date matches the creator's current active
+  // cycle is really the in-progress cycle, not a completed one — the creator page
+  // suppresses it the same way. Don't render a completion dot for it on the home
+  // chart, so the home page matches what the creator page shows.
+  const activeStartByCreator = new Map<string, string>();
+  for (const ac of activeCycles ?? []) {
+    activeStartByCreator.set(ac.creator_id as string, ac.cycle_start_date as string);
+  }
+
+  const events = (data ?? [])
+    .filter(c => activeStartByCreator.get(c.creator_id as string) !== c.cycle_start_date)
+    .map(c => {
+      const cr = (c.creators as unknown) as { name: string } | null;
+      return {
+        date: c.cycle_end_date as string,
+        creator_name: cr?.name ?? "Unknown",
+        cycle_start_date: c.cycle_start_date as string,
+        cycle_end_date: c.cycle_end_date as string,
+        base_fee: c.base_fee as number,
+      };
+    });
 
   return NextResponse.json(events);
 }

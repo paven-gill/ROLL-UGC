@@ -1,14 +1,52 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
+// GET /api/dashboard/range?days=30
+// OR  /api/dashboard/range?year=2026&month=5
+//
+// Returns per-creator views gained over the requested window, computed as a
+// cumulative-snapshot delta (endViews - baselineViews). Both modes use the same
+// calendar-delta logic so the Home stat cards always match the Views-Over-Time
+// chart (which uses the same per-day snapshot deltas).
+//
+//  - days mode:  window = [today - days, today]
+//  - month mode: window = [first of month, min(last of month, today)];
+//                baseline = cumulative views at the end of the previous month.
+
+function isoDate(y: number, mZeroBased: number, d: number): string {
+  return new Date(Date.UTC(y, mZeroBased, d)).toISOString().split("T")[0];
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const days = Math.min(90, Math.max(1, parseInt(searchParams.get("days") || "30", 10)));
+  const yearParam = searchParams.get("year");
+  const monthParam = searchParams.get("month");
+
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // Resolve the window: baselineDate (exclusive lower bound — cumulative views
+  // as of this date are the starting point) and endDate (inclusive upper bound).
+  let baselineDate: string;
+  let endDate: string;
+
+  if (yearParam && monthParam) {
+    const year = parseInt(yearParam, 10);
+    const month = parseInt(monthParam, 10); // 1-12
+    // Last day of the selected month, capped at today (don't count future days).
+    const lastOfMonth = isoDate(year, month, 0); // day 0 of next month = last of this month
+    endDate = lastOfMonth < todayStr ? lastOfMonth : todayStr;
+    // Baseline = the last day of the previous month, so the delta captures only
+    // views gained within this calendar month.
+    baselineDate = isoDate(year, month - 1, 0);
+  } else {
+    const days = Math.min(90, Math.max(1, parseInt(searchParams.get("days") || "30", 10)));
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    baselineDate = cutoff.toISOString().split("T")[0];
+    endDate = todayStr;
+  }
 
   const db = createServerClient();
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  const cutoffStr = cutoff.toISOString().split("T")[0];
 
   const [{ data: creators }, { data: snapshots }] = await Promise.all([
     db.from("creators")
@@ -16,41 +54,65 @@ export async function GET(req: Request) {
       .order("name"),
     db.from("view_snapshots")
       .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
-      .order("snapshot_date", { ascending: false }),
+      .order("snapshot_date", { ascending: true }),
   ]);
 
   if (!creators) return NextResponse.json({ results: [], windowAccurate: false });
 
-  // windowAccurate = true only if every creator had a snapshot at/before the cutoff date
+  // Build per creator+platform ascending lists for nearest-prior lookups.
+  type Snap = { date: string; views: number; posts: number };
+  const byCombo = new Map<string, Snap[]>();
+  for (const s of snapshots || []) {
+    const k = `${s.creator_id}|${s.platform}`;
+    if (!byCombo.has(k)) byCombo.set(k, []);
+    byCombo.get(k)!.push({
+      date: s.snapshot_date,
+      views: s.cumulative_views ?? 0,
+      posts: s.post_count_30d ?? 0,
+    });
+  }
+
+  // Most recent snapshot at/before targetDate (lists are date-ascending).
+  function atOrBefore(combo: string, targetDate: string): Snap | undefined {
+    const arr = byCombo.get(combo);
+    if (!arr) return undefined;
+    let r: Snap | undefined;
+    for (const s of arr) { if (s.date <= targetDate) r = s; else break; }
+    return r;
+  }
+
+  // windowAccurate = true only if every tracked creator+platform had a snapshot
+  // at/before the baseline date (otherwise we fall back to the earliest snapshot,
+  // which can over-count because it predates the window start).
   let windowAccurate = true;
 
   const results = creators.map(creator => {
     let ig_views = 0, tt_views = 0, ig_posts = 0, tt_posts = 0;
 
     for (const platform of ["instagram", "tiktok"] as const) {
-      const snaps = (snapshots || []).filter(
-        s => s.creator_id === creator.id && s.platform === platform
-      );
+      const combo = `${creator.id}|${platform}`;
+      const arr = byCombo.get(combo);
+      if (!arr || arr.length === 0) continue;
 
-      const latest = snaps[0];
-      if (!latest) continue;
+      const end = atOrBefore(combo, endDate);
+      if (!end) continue; // no snapshot within/before the window — nothing to show
 
-      // Prefer snapshot at/before cutoff; fall back to oldest available so we show
-      // something rather than 0 while daily syncing hasn't been running yet.
-      const atCutoff = snaps.find(s => s.snapshot_date <= cutoffStr);
-      if (!atCutoff) windowAccurate = false;
-      const baseline = atCutoff ?? snaps[snaps.length - 1];
+      // Baseline = cumulative views as of baselineDate. Fall back to the earliest
+      // snapshot when none exists yet (e.g. creator started mid-window).
+      const baselineSnap = atOrBefore(combo, baselineDate);
+      if (!baselineSnap) windowAccurate = false;
+      const baseline = baselineSnap ?? arr[0];
 
-      const views = baseline && baseline.snapshot_date !== latest.snapshot_date
-        ? Math.max(0, latest.cumulative_views - baseline.cumulative_views)
+      const views = baseline.date !== end.date
+        ? Math.max(0, end.views - baseline.views)
         : 0;
 
       if (platform === "instagram") {
         ig_views = views;
-        ig_posts = latest.post_count_30d || 0;
+        ig_posts = end.posts;
       } else {
         tt_views = views;
-        tt_posts = latest.post_count_30d || 0;
+        tt_posts = end.posts;
       }
     }
 
