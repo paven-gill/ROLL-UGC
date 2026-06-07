@@ -7,7 +7,7 @@ import {
   RefreshCw, Plus, Instagram, Music2,
   Eye, FileVideo, TrendingUp, ChevronRight, ChevronDown, CalendarDays,
   ArrowUpDown, Pencil, Heart, MessageCircle, CheckCircle2, Clock,
-  Wallet, Building2,
+  Wallet, Building2, Download,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -1205,6 +1205,8 @@ interface PaidCycle {
   payout_amount: number;
   base_fee: number;
   view_bonus: number;
+  bonus_amount: number | null;
+  bonus_note: string | null;
   views_earned: number;
   status: string;
   paid_at: string | null;
@@ -1289,6 +1291,38 @@ function FinanceTab() {
     setData(null);
     setNotConfigured(true);
     setDisconnecting(false);
+  }
+
+  function exportPayoutsCSV() {
+    const headers = [
+      "Creator", "Cycle Start", "Cycle End", "Paid Date", "Views Earned",
+      "Base Fee", "View Bonus", "Bonus", "Bonus Note", "Total Paid", "Wise Status",
+    ];
+    const esc = (v: unknown) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = paidCycles.map(c => [
+      c.creators?.name ?? "",
+      c.cycle_start_date,
+      c.cycle_end_date,
+      (c.paid_at ?? c.created_at)?.slice(0, 10) ?? "",
+      c.views_earned,
+      c.base_fee.toFixed(2),
+      c.view_bonus.toFixed(2),
+      (c.bonus_amount ?? 0).toFixed(2),
+      c.bonus_note ?? "",
+      c.payout_amount.toFixed(2),
+      c.wise?.status ?? "none",
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payouts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -1409,7 +1443,18 @@ function FinanceTab() {
 
           {/* Dashboard payout history */}
           <div>
-            <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-3">Paid via Dashboard</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] text-gray-600 uppercase tracking-wider">Paid via Dashboard</p>
+              {paidCycles.length > 0 && (
+                <button
+                  onClick={exportPayoutsCSV}
+                  className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-white/[0.1] hover:border-white/[0.25] rounded-lg px-3 py-1.5 transition-all"
+                >
+                  <Download size={12} />
+                  Export CSV
+                </button>
+              )}
+            </div>
             {paidCycles.length === 0 ? (
               <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
                 No completed payouts yet.

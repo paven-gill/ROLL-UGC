@@ -17,6 +17,8 @@ export async function GET() {
       payout_amount,
       base_fee,
       view_bonus,
+      bonus_amount,
+      bonus_note,
       views_earned,
       status,
       paid_at,
