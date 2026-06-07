@@ -6,17 +6,25 @@ export const maxDuration = 300;
 
 // ─── GET /api/sync (daily cron at 11:55pm UTC) ────────────────────────────────
 //
-// Fan-out orchestrator. Instead of syncing every creator sequentially inside
-// this one function (which blew past the 300s limit and starved whoever was
-// last in line), we fire one independent POST /api/sync/[id] invocation per
-// creator, all in parallel. Each child:
-//   • runs as its own Vercel function with its own fresh 300s budget, so no
-//     creator can starve another, and
-//   • persists its own snapshot independently — so even if THIS parent times
-//     out, every child that already finished has committed its data.
+// Two-phase orchestrator:
 //
-// Wall-clock for the whole batch ≈ the slowest single creator (~1–3 min),
-// not the sum of all of them.
+//   Phase 1 — TikTok, batched. One POST /api/sync/tiktok scrapes EVERY creator's
+//     TikTok in a single Apify run and commits their snapshots. This is the cost
+//     fix: the Apify run's startup overhead is paid once per night instead of
+//     once per creator, so the bill stops scaling linearly with creator count.
+//     We await it so every TikTok snapshot is committed before phase 2's cycle
+//     checks read today's view totals.
+//
+//   Phase 2 — Instagram, fanned out. One independent POST /api/sync/[id]?skipTiktok=1
+//     per creator, all in parallel. Each child:
+//       • runs as its own Vercel function with its own fresh 300s budget, so no
+//         creator can starve another, and
+//       • persists its own snapshot independently — so even if THIS parent times
+//         out, every child that already finished has committed its data.
+//     (Instagram stays per-creator because it's RapidAPI, billed per request,
+//     not per run — there's no batching win there.)
+//
+// Wall-clock ≈ batched TikTok run + the slowest single Instagram creator.
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -24,7 +32,7 @@ async function triggerCreatorSync(
   baseUrl: string,
   creator: { id: string; name: string }
 ): Promise<Record<string, unknown>> {
-  const url = `${baseUrl}/api/sync/${creator.id}`;
+  const url = `${baseUrl}/api/sync/${creator.id}?skipTiktok=1`;
   // One retry to ride out transient network / cold-start hiccups.
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -82,10 +90,28 @@ export async function GET(req: Request) {
 
   const list = creators ?? [];
 
-  // Fire all children. We stagger the *launches* by 250ms to avoid a thundering
-  // herd on the upstream APIs, but we do NOT wait for one to finish before
-  // launching the next — they all run concurrently. Promise.allSettled waits
-  // for the whole batch.
+  // ── Phase 1: batched TikTok for all creators in one Apify run ──────────────
+  // Awaited so every TikTok snapshot is committed before the Instagram children
+  // run their cycle checks. A failure here is non-fatal — we log it and still
+  // run Instagram; the manual "Sync now" button is the per-creator fallback.
+  let tiktok: Record<string, unknown> = { status: "skipped" };
+  try {
+    const res = await fetch(`${baseUrl}/api/sync/tiktok`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+    });
+    tiktok = res.ok
+      ? { status: "ok", ...(await res.json()) }
+      : { status: "error", error: `HTTP ${res.status} ${res.statusText}` };
+  } catch (e) {
+    console.error("[sync] batched TikTok failed:", e);
+    tiktok = { status: "error", error: String(e) };
+  }
+
+  // ── Phase 2: fan out Instagram (+ cycle check) per creator ─────────────────
+  // We stagger the *launches* by 250ms to avoid a thundering herd on the upstream
+  // APIs, but we do NOT wait for one to finish before launching the next — they
+  // all run concurrently. Promise.allSettled waits for the whole batch.
   const settled = await Promise.allSettled(
     list.map(async (creator, i) => {
       await sleep(i * 250);
@@ -111,6 +137,7 @@ export async function GET(req: Request) {
   console.log(`[sync] fan-out complete: ${ok} ok, ${failed} failed of ${results.length}`);
 
   return NextResponse.json({
+    tiktok,
     triggered: results.length,
     ok,
     failed,

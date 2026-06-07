@@ -27,10 +27,9 @@ export async function GET(req: Request) {
   const [
     { data: completed },
     { data: activeCycles },
-    { data: allActiveCycles },
     { data: latestSnaps },
   ] = await Promise.all([
-    // Completed cycles ending in this month
+    // Completed cycles ending in this month (pending = to pay, paid = already paid)
     db.from("payout_cycles")
       .select("*, creators(name, instagram_username, tiktok_username)")
       .gte("cycle_end_date", firstDay)
@@ -41,17 +40,11 @@ export async function GET(req: Request) {
       .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views)")
       .gte("cycle_end_date", firstDay)
       .lt("cycle_end_date", nextFirstDay),
-    // ALL active creators — regardless of which month their cycle ends in
-    db.from("creator_cycles").select("creator_id"),
     // Latest daily snapshot per creator+platform for current-views calculation
     db.from("view_snapshots")
       .select("creator_id, platform, cumulative_views, snapshot_date")
       .order("snapshot_date", { ascending: false }),
   ]);
-
-  // Any creator with a live cycle is excluded from completed rows — their old payout_cycles
-  // row (which may end in a different month) must not show until the new cycle closes.
-  const allActiveCreatorIds = new Set((allActiveCycles ?? []).map(c => c.creator_id));
 
   // Helper: sum latest cumulative_views across all platforms for a creator
   function latestTotalViews(creatorId: string): number {
@@ -63,7 +56,11 @@ export async function GET(req: Request) {
     return Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
   }
 
-  // In-progress estimates — all active cycles ending this month
+  // A stamped payout for this month is the authoritative figure for that creator —
+  // don't also show their (new) running cycle as an in-progress estimate for the same month.
+  const completedCreatorIds = new Set((completed ?? []).map(c => c.creator_id));
+
+  // In-progress estimates — active cycles ending this month, minus already-stamped creators
   const inProgress = (activeCycles ?? [])
     .flatMap(cycle => {
       const cr = cycle.creators as {
@@ -71,6 +68,7 @@ export async function GET(req: Request) {
         base_fee: number; rate_per_thousand_views: number;
       } | null;
       if (!cr) return [];
+      if (completedCreatorIds.has(cycle.creator_id)) return [];
 
       const currentViews = latestTotalViews(cycle.creator_id);
       const views_so_far = Math.max(0, currentViews - (cycle.baseline_views ?? 0));
@@ -95,8 +93,8 @@ export async function GET(req: Request) {
       }];
     });
 
-  // Shape completed cycles — skip any creator that currently has an active cycle (any month)
-  const completedRows = (completed ?? []).filter(c => !allActiveCreatorIds.has(c.creator_id)).map(c => {
+  // Shape completed cycles ending in this month (both pending and paid)
+  const completedRows = (completed ?? []).map(c => {
     const cr = c.creators as { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
     return {
       id: c.id as string,

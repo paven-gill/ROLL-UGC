@@ -36,32 +36,45 @@ export async function GET() {
     return NextResponse.json({ error: "wise_unreachable" }, { status: 502 });
   }
 
-  const profile = profiles.find((p: any) => p.type?.toLowerCase() === "business") ?? profiles[0];
-  if (!profile) {
+  if (!profiles.length) {
     return NextResponse.json({ error: "no_profiles" }, { status: 404 });
   }
 
-  let balances: any[];
+  // Fetch balances for all profiles and merge, skipping zero-balance currencies
+  // (money may be in personal account even when a business profile exists)
+  let allBalances: any[] = [];
   try {
-    const res = await fetch(
-      `${WISE_BASE}/v4/profiles/${profile.id}/balances?types=STANDARD`,
-      { headers },
+    const results = await Promise.all(
+      profiles.map(p =>
+        fetch(`${WISE_BASE}/v4/profiles/${p.id}/balances?types=STANDARD`, { headers })
+          .then(r => r.ok ? r.json() : [])
+          .catch(() => [])
+      )
     );
-    if (!res.ok) {
-      return NextResponse.json({ error: "balance_fetch_failed" }, { status: res.status });
-    }
-    balances = await res.json();
+    allBalances = results.flat();
   } catch {
     return NextResponse.json({ error: "wise_unreachable" }, { status: 502 });
   }
 
-  const name =
-    profile.type?.toLowerCase() === "business"
-      ? profile.details?.name
-      : `${profile.details?.firstName ?? ""} ${profile.details?.lastName ?? ""}`.trim();
+  // Merge currencies across profiles: sum amounts for the same currency
+  const merged = new Map<string, { id: number; currency: string; amount: { value: number; currency: string }; name: string | null }>();
+  for (const b of allBalances) {
+    const existing = merged.get(b.currency);
+    if (existing) {
+      existing.amount.value += b.amount?.value ?? 0;
+    } else {
+      merged.set(b.currency, { id: b.id, currency: b.currency, amount: { value: b.amount?.value ?? 0, currency: b.currency }, name: b.name ?? null });
+    }
+  }
+  const balances = Array.from(merged.values()).filter(b => b.amount.value > 0 || merged.size <= 1);
+
+  const businessProfile = profiles.find((p: any) => p.type?.toLowerCase() === "business") ?? profiles[0];
+  const name = businessProfile.type?.toLowerCase() === "business"
+    ? businessProfile.details?.name
+    : `${businessProfile.details?.firstName ?? ""} ${businessProfile.details?.lastName ?? ""}`.trim();
 
   return NextResponse.json({
-    profile: { id: profile.id, type: profile.type, name },
+    profile: { id: businessProfile.id, type: businessProfile.type, name },
     balances,
   });
 }

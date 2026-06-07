@@ -285,16 +285,23 @@ export async function scrapeInstagram(username: string, joinedAt?: string | null
 
 // ─── TikTok via Apify ─────────────────────────────────────────────────────────
 
-async function apifyRunAndCollect(input: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+const TIKTOK_ACTOR = "clockworks~free-tiktok-scraper";
+
+// Start an actor run and poll to completion, returning the dataset items.
+// `timeoutMs` scales with how big a batch we asked for (one profile vs many).
+async function apifyRunAndCollect(
+  input: Record<string, unknown>,
+  timeoutMs = 180_000
+): Promise<Record<string, unknown>[]> {
   const token = process.env.APIFY_API_TOKEN;
   const runRes = await fetch(
-    `https://api.apify.com/v2/acts/clockworks~free-tiktok-scraper/runs?token=${token}`,
+    `https://api.apify.com/v2/acts/${TIKTOK_ACTOR}/runs?token=${token}`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }
   );
   if (!runRes.ok) throw new Error(`Apify start run → ${runRes.status} ${runRes.statusText}`);
   const runId = (await runRes.json()).data.id as string;
 
-  const deadline = Date.now() + 180_000;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 5_000));
     const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
@@ -308,34 +315,36 @@ async function apifyRunAndCollect(input: Record<string, unknown>): Promise<Recor
       throw new Error(`Apify actor run ${status}`);
     }
   }
-  throw new Error("Apify actor run timed out after 180s");
+  throw new Error(`Apify actor run timed out after ${Math.round(timeoutMs / 1000)}s`);
 }
 
-export async function scrapeTikTok(username: string, joinedAt?: string | null): Promise<ScrapedData> {
-  const items = await apifyRunAndCollect({
-    profiles: [`https://www.tiktok.com/@${username}`],
-    resultsPerPage: 100,
-    shouldDownloadVideos: false,
-    shouldDownloadCovers: false,
-  });
+const normalizeHandle = (s: string) => s.trim().replace(/^@/, "").toLowerCase();
+
+// Which creator a scraped video belongs to. Prefer the author handle in the
+// item's metadata; fall back to parsing @handle out of the video URL.
+function authorHandle(item: Record<string, unknown>): string | null {
+  const meta = item.authorMeta as Record<string, unknown> | undefined;
+  const name = (meta?.name as string) || (meta?.uniqueId as string);
+  if (typeof name === "string" && name) return name.trim().toLowerCase();
+  const url = item.webVideoUrl as string | undefined;
+  const m = url?.match(/@([^/]+)\//);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Normalize a flat list of scraped video items (already filtered to one author)
+// into our snapshot. Shared by the single + batched scrape paths.
+function buildTikTokData(items: Record<string, unknown>[], joinedAt?: string | null): ScrapedData {
   if (!items.length) return { cumulative_views: 0, posts_last_30_days: 0, follower_count: 0, posts: [] };
 
-  const first = items[0] as Record<string, unknown>;
-  const authorMeta = (first.authorMeta as Record<string, unknown>) || {};
+  const authorMeta = (items[0].authorMeta as Record<string, unknown>) || {};
   const follower_count = (authorMeta.fans as number) || 0;
-
   const joinedAtTs = joinedAt ? new Date(joinedAt).getTime() : 0;
 
   let cumulative_views = 0;
   let posts_last_30_days = 0;
   const posts: PostSnapshot[] = [];
 
-  if (items.length > 0) {
-    const sample = items[0] as Record<string, unknown>;
-    console.log(`[apify] TikTok sample fields: createTimeISO=${sample.createTimeISO} createTime=${sample.createTime} playCount=${sample.playCount} id=${sample.id}`);
-  }
-
-  for (const item of items as Record<string, unknown>[]) {
+  for (const item of items) {
     // Build a date string — handle missing/invalid timestamps gracefully
     let dateStr: string | null = null;
     if (typeof item.createTimeISO === "string" && item.createTimeISO) {
@@ -372,6 +381,69 @@ export async function scrapeTikTok(username: string, joinedAt?: string | null): 
     });
   }
 
-  console.log(`[apify] TikTok @${username} — cumulative: ${cumulative_views}, posts (30d): ${posts_last_30_days}, followers: ${follower_count}`);
   return { cumulative_views, posts_last_30_days, follower_count, posts };
+}
+
+// Single-creator scrape — used by the manual "Sync now" button.
+export async function scrapeTikTok(username: string, joinedAt?: string | null): Promise<ScrapedData> {
+  const items = await apifyRunAndCollect({
+    profiles: [`https://www.tiktok.com/@${normalizeHandle(username)}`],
+    resultsPerPage: 100,
+    shouldDownloadVideos: false,
+    shouldDownloadCovers: false,
+  });
+  const data = buildTikTokData(items, joinedAt);
+  console.log(`[apify] TikTok @${username} — cumulative: ${data.cumulative_views}, posts (30d): ${data.posts_last_30_days}, followers: ${data.follower_count}`);
+  return data;
+}
+
+export interface TikTokTarget {
+  username: string;
+  joinedAt?: string | null;
+}
+
+// ONE Apify run for many creators. The actor accepts a list of profile URLs and
+// returns a flat array of videos across all of them; we group by author handle
+// and build each creator's snapshot. This keeps the per-run startup overhead
+// constant no matter how many creators we track — vs one run per creator, where
+// that overhead is paid N times. Returns a map keyed by normalized handle.
+export async function scrapeTikTokBatch(targets: TikTokTarget[]): Promise<Map<string, ScrapedData>> {
+  const result = new Map<string, ScrapedData>();
+  if (!targets.length) return result;
+
+  // Pre-seed every requested creator with a zero result, so a creator the actor
+  // returned nothing for still gets a (zero) snapshot rather than being skipped.
+  for (const t of targets) result.set(normalizeHandle(t.username), buildTikTokData([], t.joinedAt));
+
+  // Scale the poll timeout with batch size, capped so a single Vercel function
+  // (maxDuration 300s) keeps headroom to store the snapshots afterward.
+  const timeoutMs = Math.min(240_000, 60_000 + targets.length * 3_000);
+
+  const items = await apifyRunAndCollect(
+    {
+      profiles: targets.map(t => `https://www.tiktok.com/@${normalizeHandle(t.username)}`),
+      resultsPerPage: 100,
+      shouldDownloadVideos: false,
+      shouldDownloadCovers: false,
+    },
+    timeoutMs
+  );
+
+  // Group the flat result list by author handle.
+  const byAuthor = new Map<string, Record<string, unknown>[]>();
+  for (const item of items) {
+    const author = authorHandle(item);
+    if (!author) continue;
+    const list = byAuthor.get(author) ?? [];
+    list.push(item);
+    byAuthor.set(author, list);
+  }
+
+  for (const t of targets) {
+    const key = normalizeHandle(t.username);
+    result.set(key, buildTikTokData(byAuthor.get(key) ?? [], t.joinedAt));
+  }
+
+  console.log(`[apify] TikTok batch — ${targets.length} creators requested, ${items.length} videos, ${byAuthor.size} authors matched`);
+  return result;
 }
