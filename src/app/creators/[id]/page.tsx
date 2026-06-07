@@ -412,9 +412,16 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
   const allPosts = posts.length;
   const allViews = posts.reduce((s, p) => s + p.view_count_used, 0);
-  const totalPaidOut = (cycleData?.cycleHistory ?? [])
-    .filter(c => c.status === "paid")
+  // Lifetime total: every stamped cycle (paid + pending) plus the current
+  // in-progress cycle's accrued view bonus — i.e. all of it, to date.
+  const stampedTotal = (cycleData?.cycleHistory ?? [])
+    .filter(c => c.status === "paid" || c.status === "pending")
     .reduce((sum, c) => sum + (c.payout_amount ?? 0), 0);
+  const activeCycleRow = (cycleData?.cycleHistory ?? []).find(c => c.status === "in_progress");
+  const currentCycleBonus = activeCycleRow
+    ? (activeCycleRow.views_earned / 1000) * (creator.rate_per_thousand_views ?? 0)
+    : 0;
+  const totalPaidOut = stampedTotal + currentCycleBonus;
   const monthly_target = creator.monthly_target ?? 30;
 
   return (
