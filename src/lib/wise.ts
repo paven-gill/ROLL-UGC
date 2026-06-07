@@ -125,67 +125,70 @@ export function pickWiseProfile(profiles: any[]): any {
 }
 
 // --- Transactions / reconciliation ---------------------------------------
+// We use the Activities API (/v1/profiles/{id}/activities), which mirrors the
+// real Wise activity feed — individual transfers AND batch payouts, with
+// names, amounts and statuses. The older /v1/transfers endpoint omitted batch
+// payments and team-member sends, so it didn't match what the user sees.
 
-export type WiseTransfer = {
+export type WiseActivity = {
   id: string;
-  status: string;            // raw Wise status, e.g. "outgoing_payment_sent"
-  sourceValue: number;       // amount taken from balance (usually USD)
-  sourceCurrency: string;
-  targetValue: number;       // amount the recipient receives
-  targetCurrency: string;
-  recipientId: number | null;
-  recipientName: string;     // resolved account holder name
-  reference: string | null;
+  type: string;              // "TRANSFER" | "BATCH_TRANSFER" | "INTERBALANCE" | ...
+  transferId: string | null; // underlying resource id (for TRANSFER)
+  name: string;              // recipient / title, HTML stripped
+  description: string;       // e.g. "Sent", "Processing", "Cancelled"
+  amount: number;            // parsed primary amount
+  currency: string;
+  incoming: boolean;         // true for money received
+  status: string;            // raw: COMPLETED | IN_PROGRESS | CANCELLED | ...
   created: string | null;    // ISO date
 };
 
-// Fetch recent transfers for a profile, with recipient names resolved.
-export async function fetchWiseTransfers(
+function stripHtml(s: string): string {
+  return (s ?? "").replace(/<[^>]+>/g, "").trim();
+}
+
+// Parse Wise's display amount strings: "266 USD", "3,000 USD",
+// "<positive>+ 5,993.89 USD</positive>".
+function parseWiseAmount(primaryAmount: string): { value: number; currency: string; incoming: boolean } {
+  const incoming = /\+/.test(primaryAmount ?? "") || /positive/.test(primaryAmount ?? "");
+  const txt = stripHtml(primaryAmount).replace(/,/g, "");
+  const m = txt.match(/(-?[\d.]+)\s*([A-Z]{3})/);
+  if (!m) return { value: 0, currency: "", incoming };
+  return { value: parseFloat(m[1]), currency: m[2], incoming };
+}
+
+// Fetch the activity feed for a profile.
+export async function fetchWiseActivities(
   token: string,
   profileId: number,
-  limit = 50,
-): Promise<WiseTransfer[]> {
-  const headers = { Authorization: `Bearer ${token}` };
-
-  // Recipient id -> name map (so we can match transfers to creators by name).
-  const nameById = new Map<number, string>();
-  try {
-    const accRes = await fetch(`${WISE_BASE}/v2/accounts?profileId=${profileId}&size=200`, { headers });
-    if (accRes.ok) {
-      const data = await accRes.json();
-      const list = data.content ?? data;
-      for (const a of list) {
-        nameById.set(a.id, a.accountHolderName ?? a.name?.fullName ?? "");
-      }
-    }
-  } catch {}
-
-  const res = await fetch(`${WISE_BASE}/v1/transfers?profile=${profileId}&limit=${limit}`, { headers });
+  size = 60,
+): Promise<WiseActivity[]> {
+  const res = await fetch(`${WISE_BASE}/v1/profiles/${profileId}/activities?size=${size}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) {
-    const err: any = new Error(`wise_transfers_${res.status}`);
+    const err: any = new Error(`wise_activities_${res.status}`);
     err.status = res.status;
     throw err;
   }
-  const raw = await res.json();
-  return (raw as any[]).map((t) => ({
-    id: String(t.id),
-    status: t.status ?? "unknown",
-    sourceValue: t.sourceValue ?? 0,
-    sourceCurrency: t.sourceCurrency ?? "",
-    targetValue: t.targetValue ?? 0,
-    targetCurrency: t.targetCurrency ?? "",
-    recipientId: t.targetAccount ?? null,
-    recipientName: (t.targetAccount && nameById.get(t.targetAccount)) || "",
-    reference: t.details?.reference ?? t.reference ?? null,
-    created: t.created ?? null,
-  }));
+  const j = await res.json();
+  const items: any[] = j.activities ?? j.content ?? j ?? [];
+  return items.map((a) => {
+    const amt = parseWiseAmount(a.primaryAmount ?? "");
+    return {
+      id: String(a.id ?? a.resource?.id ?? ""),
+      type: a.type ?? "UNKNOWN",
+      transferId: a.resource?.id ? String(a.resource.id) : null,
+      name: stripHtml(a.title ?? ""),
+      description: stripHtml(a.description ?? ""),
+      amount: amt.value,
+      currency: amt.currency,
+      incoming: amt.incoming,
+      status: a.status ?? "UNKNOWN",
+      created: a.createdOn ?? null,
+    };
+  });
 }
-
-// Wise statuses that mean the money actually left (confirmed paid).
-const WISE_SENT_STATUSES = new Set(["outgoing_payment_sent", "funds_refunded", "charged_back"]);
-const WISE_PENDING_STATUSES = new Set([
-  "incoming_payment_waiting", "incoming_payment_initiated", "processing", "funds_converted", "bounced_back",
-]);
 
 export type PayoutMatch = {
   status: "confirmed" | "pending" | "cancelled" | "none";
@@ -196,49 +199,49 @@ export type PayoutMatch = {
 };
 
 function norm(s: string): string {
-  return (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // Fold accents first (É -> E) so "Eabha" matches "Éabha", then strip the rest.
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
-// Match one recorded payout against the list of real Wise transfers.
-// Heuristic: recipient name ~ creator name AND amount ~ payout total
-// (compared against both the source and target leg to handle conversions).
+// Match one recorded payout against the real Wise activity feed.
+// Heuristic: recipient name ~ creator name AND amount ~ payout total.
+// Only individual outgoing TRANSFERs are matchable — batch "payouts" show a
+// single combined total with no per-creator name, so they can't be matched.
 export function matchPayout(
   creatorName: string,
   payoutAmount: number,
-  transfers: WiseTransfer[],
+  activities: WiseActivity[],
 ): PayoutMatch {
   const cn = norm(creatorName);
   const amountClose = (v: number) => v > 0 && Math.abs(v - payoutAmount) <= Math.max(1, payoutAmount * 0.02);
 
-  const candidates = transfers.filter((t) => {
-    const rn = norm(t.recipientName);
+  const candidates = activities.filter((a) => {
+    if (a.incoming || a.type !== "TRANSFER") return false;
+    const rn = norm(a.name);
     const nameOk = cn.length > 0 && rn.length > 0 && (rn.includes(cn) || cn.includes(rn));
-    const amountOk = amountClose(t.sourceValue) || amountClose(t.targetValue);
-    return nameOk && amountOk;
+    return nameOk && amountClose(a.amount);
   });
   if (!candidates.length) return { status: "none", transferId: null, amount: null, currency: null, created: null };
 
-  // Prefer a sent transfer, then pending, then most recent.
-  const rank = (t: WiseTransfer) =>
-    WISE_SENT_STATUSES.has(t.status) ? 0 : WISE_PENDING_STATUSES.has(t.status) ? 1 : t.status === "cancelled" ? 3 : 2;
+  // Prefer completed, then in-progress, then most recent.
+  const rank = (a: WiseActivity) =>
+    a.status === "COMPLETED" ? 0 : a.status === "IN_PROGRESS" ? 1 : a.status === "CANCELLED" ? 3 : 2;
   candidates.sort((a, b) => rank(a) - rank(b) || (b.created ?? "").localeCompare(a.created ?? ""));
   const best = candidates[0];
 
-  const status = WISE_SENT_STATUSES.has(best.status)
+  const status = best.status === "COMPLETED"
     ? "confirmed"
-    : WISE_PENDING_STATUSES.has(best.status)
+    : best.status === "IN_PROGRESS"
     ? "pending"
-    : best.status === "cancelled"
+    : best.status === "CANCELLED"
     ? "cancelled"
     : "pending";
 
-  return {
-    status,
-    transferId: best.id,
-    amount: best.sourceValue || best.targetValue,
-    currency: best.sourceCurrency || best.targetCurrency,
-    created: best.created,
-  };
+  return { status, transferId: best.transferId, amount: best.amount, currency: best.currency, created: best.created };
 }
 
 // Convenience: resolve token + target profile in one call.

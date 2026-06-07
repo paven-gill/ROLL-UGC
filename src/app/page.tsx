@@ -1213,13 +1213,13 @@ interface PaidCycle {
 
 interface WiseTransferRow {
   id: string;
+  type: string;
+  name: string;
+  description: string;
+  amount: number;
+  currency: string;
+  incoming: boolean;
   status: string;
-  sourceValue: number;
-  sourceCurrency: string;
-  targetValue: number;
-  targetCurrency: string;
-  recipientName: string;
-  reference: string | null;
   created: string | null;
 }
 
@@ -1253,7 +1253,7 @@ function FinanceTab() {
     fetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
     fetch("/api/wise/transactions")
       .then(r => r.json())
-      .then(d => setTransactions(Array.isArray(d?.transfers) ? d.transfers : []))
+      .then(d => setTransactions(Array.isArray(d?.transactions) ? d.transactions : []))
       .catch(() => setTransactions([]));
   }, []);
 
@@ -1481,17 +1481,17 @@ function FinanceTab() {
                     {transactions.map(t => (
                       <tr key={t.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
                         <td className="px-5 py-3.5">
-                          <p className="text-white font-medium text-sm">{t.recipientName || "—"}</p>
-                          {t.reference && <p className="text-gray-600 text-xs mt-0.5 truncate max-w-[200px]">{t.reference}</p>}
+                          <p className="text-white font-medium text-sm">{t.name || "—"}</p>
+                          {t.description && <p className="text-gray-600 text-xs mt-0.5 truncate max-w-[220px]">{t.description}</p>}
                         </td>
                         <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
                           {t.created ? new Date(t.created).toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                         </td>
-                        <td className="px-4 py-3.5 text-right text-white tabular-nums">
-                          {new Intl.NumberFormat("en-AU", { style: "currency", currency: t.sourceCurrency || "USD" }).format(t.sourceValue)}
-                          {t.targetCurrency && t.targetCurrency !== t.sourceCurrency && (
-                            <span className="text-gray-600 text-xs ml-1">→ {t.targetCurrency}</span>
-                          )}
+                        <td className={`px-4 py-3.5 text-right tabular-nums ${t.incoming ? "text-emerald-400" : "text-white"}`}>
+                          {t.incoming ? "+" : ""}
+                          {t.currency
+                            ? new Intl.NumberFormat("en-AU", { style: "currency", currency: t.currency }).format(t.amount)
+                            : t.amount}
                         </td>
                         <td className="px-5 py-3.5 text-center">
                           <WiseStatusBadge status={t.status} />
@@ -1524,10 +1524,10 @@ function WiseMatchBadge({ match }: { match?: PayoutWiseMatch | null }) {
 }
 
 function WiseStatusBadge({ status }: { status: string }) {
-  const sent = status === "outgoing_payment_sent";
-  const cancelled = status === "cancelled" || status === "bounced_back";
-  const label = status.replace(/_/g, " ");
-  const cls = sent ? "text-emerald-400" : cancelled ? "text-red-400/80" : "text-yellow-400/80";
+  const done = status === "COMPLETED";
+  const cancelled = status === "CANCELLED" || status === "REFUNDED";
+  const label = status.replace(/_/g, " ").toLowerCase();
+  const cls = done ? "text-emerald-400" : cancelled ? "text-red-400/80" : "text-yellow-400/80";
   return <span className={`${cls} text-xs capitalize`}>{label}</span>;
 }
 

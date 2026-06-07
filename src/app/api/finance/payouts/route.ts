@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import {
-  getWiseToken, fetchWiseProfiles, pickWiseProfile, fetchWiseTransfers, matchPayout,
-  type WiseTransfer,
+  getWiseToken, fetchWiseProfiles, pickWiseProfile, fetchWiseActivities, matchPayout,
+  type WiseActivity,
 } from "@/lib/wise";
 
 export async function GET() {
@@ -39,19 +39,19 @@ export async function GET() {
   // Live reconciliation: pull real Wise transfers and match each payout by
   // recipient name + amount. Best-effort — if Wise is unreachable we still
   // return the payouts, just without a match.
-  let transfers: WiseTransfer[] = [];
+  let activities: WiseActivity[] = [];
   try {
     const token = await getWiseToken();
     if (token) {
       const profiles = await fetchWiseProfiles(token);
       const profile = pickWiseProfile(profiles);
-      if (profile) transfers = await fetchWiseTransfers(token, profile.id, 60);
+      if (profile) activities = await fetchWiseActivities(token, profile.id, 60);
     }
   } catch {}
 
   const enriched = cycles.map((c: any) => {
     const name = c.creators?.name ?? "";
-    const wise = transfers.length ? matchPayout(name, c.payout_amount, transfers) : null;
+    const wise = activities.length ? matchPayout(name, c.payout_amount, activities) : null;
     return { ...c, wise };
   });
 

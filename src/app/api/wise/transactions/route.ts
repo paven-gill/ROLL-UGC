@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getWiseToken, fetchWiseProfiles, pickWiseProfile, fetchWiseTransfers } from "@/lib/wise";
+import { getWiseToken, fetchWiseProfiles, pickWiseProfile, fetchWiseActivities } from "@/lib/wise";
 
 // GET /api/wise/transactions — recent real transfers from the Wise account.
 export async function GET() {
@@ -18,8 +18,8 @@ export async function GET() {
   }
 
   try {
-    const transfers = await fetchWiseTransfers(token, profileId, 60);
-    return NextResponse.json({ transfers });
+    const transactions = await fetchWiseActivities(token, profileId, 60);
+    return NextResponse.json({ transactions });
   } catch {
     return NextResponse.json({ error: "wise_unreachable" }, { status: 502 });
   }
