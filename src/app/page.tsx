@@ -1237,6 +1237,16 @@ function FinanceTab() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [paidCycles, setPaidCycles] = useState<PaidCycle[]>([]);
   const [transactions, setTransactions] = useState<WiseTransferRow[]>([]);
+  const [monthFilter, setMonthFilter] = useState("all");
+
+  // Group payouts by the month they were paid (fallback to record creation).
+  const payMonthKey = (c: PaidCycle) => (c.paid_at ?? c.created_at ?? "").slice(0, 7);
+  const monthLabel = (k: string) => {
+    const [y, m] = k.split("-");
+    return `${MONTHS[parseInt(m, 10) - 1]} ${y}`;
+  };
+  const availableMonths = Array.from(new Set(paidCycles.map(payMonthKey).filter(Boolean))).sort().reverse();
+  const visibleCycles = monthFilter === "all" ? paidCycles : paidCycles.filter(c => payMonthKey(c) === monthFilter);
 
   function fetchBalance() {
     setLoading(true);
@@ -1302,7 +1312,7 @@ function FinanceTab() {
       const s = String(v ?? "");
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const rows = paidCycles.map(c => [
+    const rows = visibleCycles.map(c => [
       c.creators?.name ?? "",
       c.cycle_start_date,
       c.cycle_end_date,
@@ -1320,7 +1330,7 @@ function FinanceTab() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `payouts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `payouts-${monthFilter === "all" ? "all" : monthFilter}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1446,18 +1456,34 @@ function FinanceTab() {
             <div className="flex items-center justify-between mb-3">
               <p className="text-[11px] text-gray-600 uppercase tracking-wider">Paid via Dashboard</p>
               {paidCycles.length > 0 && (
-                <button
-                  onClick={exportPayoutsCSV}
-                  className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-white/[0.1] hover:border-white/[0.25] rounded-lg px-3 py-1.5 transition-all"
-                >
-                  <Download size={12} />
-                  Export CSV
-                </button>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={monthFilter}
+                    onChange={e => setMonthFilter(e.target.value)}
+                    className="text-xs text-gray-300 bg-white/[0.04] border border-white/[0.1] hover:border-white/[0.25] focus:border-emerald-500/40 focus:outline-none rounded-lg px-2.5 py-1.5 transition-all cursor-pointer"
+                  >
+                    <option value="all">All time</option>
+                    {availableMonths.map(m => (
+                      <option key={m} value={m}>{monthLabel(m)}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={exportPayoutsCSV}
+                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-white/[0.1] hover:border-white/[0.25] rounded-lg px-3 py-1.5 transition-all"
+                  >
+                    <Download size={12} />
+                    Export CSV
+                  </button>
+                </div>
               )}
             </div>
             {paidCycles.length === 0 ? (
               <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
                 No completed payouts yet.
+              </div>
+            ) : visibleCycles.length === 0 ? (
+              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
+                No payouts in {monthLabel(monthFilter)}.
               </div>
             ) : (
               <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
@@ -1473,7 +1499,7 @@ function FinanceTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {paidCycles.map(c => (
+                    {visibleCycles.map(c => (
                       <tr key={c.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
                         <td className="px-5 py-3.5">
                           <p className="text-white font-medium text-sm">{c.creators?.name ?? "—"}</p>
@@ -1500,9 +1526,11 @@ function FinanceTab() {
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-white/[0.07] bg-white/[0.02]">
-                      <td colSpan={4} className="px-5 py-3 text-xs text-gray-500">Total paid</td>
+                      <td colSpan={4} className="px-5 py-3 text-xs text-gray-500">
+                        Total paid{monthFilter !== "all" ? ` · ${monthLabel(monthFilter)}` : ""}
+                      </td>
                       <td className="px-4 py-3 text-right font-bold text-emerald-400 tabular-nums">
-                        {fmtMoney(paidCycles.reduce((s, c) => s + c.payout_amount, 0))}
+                        {fmtMoney(visibleCycles.reduce((s, c) => s + c.payout_amount, 0))}
                       </td>
                       <td />
                     </tr>
@@ -1531,7 +1559,7 @@ function FinanceTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions.map(t => (
+                    {transactions.slice(0, 10).map(t => (
                       <tr key={t.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
                         <td className="px-5 py-3.5">
                           <p className="text-white font-medium text-sm">{t.name || "—"}</p>
