@@ -179,7 +179,16 @@ export async function processCycle(
   }
 
   // ─── Term is over → stamp the finished cycle and roll into the next one ───
-  const endViews = totalViews;
+  // Pin the closing total to the cumulative views AS OF the cycle's end date —
+  // not the latest snapshot, which could be days newer if this runs late (or as
+  // a catch-up). Using the boundary keeps post-end-date views in the NEXT cycle.
+  const boundaryByPlatform = new Map<string, number>();
+  for (const s of snaps ?? []) {
+    if (s.snapshot_date <= cycle.cycle_end_date && !boundaryByPlatform.has(s.platform)) {
+      boundaryByPlatform.set(s.platform, s.cumulative_views ?? 0);
+    }
+  }
+  const endViews = Array.from(boundaryByPlatform.values()).reduce((a, b) => a + b, 0);
   const viewsEarned = Math.max(0, endViews - (cycle.baseline_views ?? 0));
   const viewBonus = parseFloat(((viewsEarned / 1000) * creator.rate_per_thousand_views).toFixed(2));
   const baseFee = creator.base_fee ?? 0;
