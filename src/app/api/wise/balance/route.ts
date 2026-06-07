@@ -1,24 +1,8 @@
 import { NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase";
-
-const WISE_BASE = "https://api.transferwise.com";
-
-async function getToken(): Promise<string | null> {
-  // Supabase takes priority over env var
-  try {
-    const db = createServerClient();
-    const { data } = await db
-      .from("app_settings")
-      .select("value")
-      .eq("key", "wise_api_token")
-      .single();
-    if (data?.value) return data.value;
-  } catch {}
-  return process.env.WISE_API_TOKEN ?? null;
-}
+import { WISE_BASE, getWiseToken, fetchWiseProfiles, pickWiseProfile, wiseProfileName } from "@/lib/wise";
 
 export async function GET() {
-  const token = await getToken();
+  const token = await getWiseToken();
   if (!token) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
@@ -27,12 +11,9 @@ export async function GET() {
 
   let profiles: any[];
   try {
-    const res = await fetch(`${WISE_BASE}/v1/profiles`, { headers });
-    if (!res.ok) {
-      return NextResponse.json({ error: "wise_auth_failed" }, { status: 401 });
-    }
-    profiles = await res.json();
-  } catch {
+    profiles = await fetchWiseProfiles(token);
+  } catch (e: any) {
+    if (e?.status === 401) return NextResponse.json({ error: "wise_auth_failed" }, { status: 401 });
     return NextResponse.json({ error: "wise_unreachable" }, { status: 502 });
   }
 
@@ -40,41 +21,32 @@ export async function GET() {
     return NextResponse.json({ error: "no_profiles" }, { status: 404 });
   }
 
-  // Fetch balances for all profiles and merge, skipping zero-balance currencies
-  // (money may be in personal account even when a business profile exists)
-  let allBalances: any[] = [];
+  // Target the specific business profile (Content Creator Engine Pty Ltd),
+  // not "first business" — there are multiple business profiles on this login.
+  const profile = pickWiseProfile(profiles);
+  if (!profile) {
+    return NextResponse.json({ error: "no_target_profile" }, { status: 404 });
+  }
+
+  let balances: any[] = [];
   try {
-    const results = await Promise.all(
-      profiles.map(p =>
-        fetch(`${WISE_BASE}/v4/profiles/${p.id}/balances?types=STANDARD`, { headers })
-          .then(r => r.ok ? r.json() : [])
-          .catch(() => [])
-      )
-    );
-    allBalances = results.flat();
+    const res = await fetch(`${WISE_BASE}/v4/profiles/${profile.id}/balances?types=STANDARD`, { headers });
+    if (!res.ok) {
+      return NextResponse.json({ error: "wise_balances_failed" }, { status: 502 });
+    }
+    const arr = await res.json();
+    balances = arr.map((b: any) => ({
+      id: b.id,
+      currency: b.currency,
+      amount: { value: b.amount?.value ?? 0, currency: b.currency },
+      name: b.name ?? null,
+    }));
   } catch {
     return NextResponse.json({ error: "wise_unreachable" }, { status: 502 });
   }
 
-  // Merge currencies across profiles: sum amounts for the same currency
-  const merged = new Map<string, { id: number; currency: string; amount: { value: number; currency: string }; name: string | null }>();
-  for (const b of allBalances) {
-    const existing = merged.get(b.currency);
-    if (existing) {
-      existing.amount.value += b.amount?.value ?? 0;
-    } else {
-      merged.set(b.currency, { id: b.id, currency: b.currency, amount: { value: b.amount?.value ?? 0, currency: b.currency }, name: b.name ?? null });
-    }
-  }
-  const balances = Array.from(merged.values()).filter(b => b.amount.value > 0 || merged.size <= 1);
-
-  const businessProfile = profiles.find((p: any) => p.type?.toLowerCase() === "business") ?? profiles[0];
-  const name = businessProfile.type?.toLowerCase() === "business"
-    ? businessProfile.details?.name
-    : `${businessProfile.details?.firstName ?? ""} ${businessProfile.details?.lastName ?? ""}`.trim();
-
   return NextResponse.json({
-    profile: { id: businessProfile.id, type: businessProfile.type, name },
+    profile: { id: profile.id, type: profile.type, name: wiseProfileName(profile) },
     balances,
   });
 }

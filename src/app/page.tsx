@@ -1190,6 +1190,14 @@ interface WiseData {
   balances: WiseBalance[];
 }
 
+interface PayoutWiseMatch {
+  status: "confirmed" | "pending" | "cancelled" | "none";
+  transferId: string | null;
+  amount: number | null;
+  currency: string | null;
+  created: string | null;
+}
+
 interface PaidCycle {
   id: string;
   cycle_start_date: string;
@@ -1200,6 +1208,19 @@ interface PaidCycle {
   views_earned: number;
   status: string;
   creators: { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
+  wise?: PayoutWiseMatch | null;
+}
+
+interface WiseTransferRow {
+  id: string;
+  status: string;
+  sourceValue: number;
+  sourceCurrency: string;
+  targetValue: number;
+  targetCurrency: string;
+  recipientName: string;
+  reference: string | null;
+  created: string | null;
 }
 
 function FinanceTab() {
@@ -1211,6 +1232,7 @@ function FinanceTab() {
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [paidCycles, setPaidCycles] = useState<PaidCycle[]>([]);
+  const [transactions, setTransactions] = useState<WiseTransferRow[]>([]);
 
   function fetchBalance() {
     setLoading(true);
@@ -1229,6 +1251,10 @@ function FinanceTab() {
   useEffect(() => {
     fetchBalance();
     fetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
+    fetch("/api/wise/transactions")
+      .then(r => r.json())
+      .then(d => setTransactions(Array.isArray(d?.transfers) ? d.transfers : []))
+      .catch(() => setTransactions([]));
   }, []);
 
   async function handleConnect() {
@@ -1394,7 +1420,8 @@ function FinanceTab() {
                       <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
                       <th className="text-left px-4 py-3 text-xs text-gray-500">Period</th>
                       <th className="text-right px-4 py-3 text-xs text-gray-500">Views</th>
-                      <th className="text-right px-5 py-3 text-xs text-gray-500">Amount</th>
+                      <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
+                      <th className="text-center px-5 py-3 text-xs text-gray-500">Wise</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1409,8 +1436,11 @@ function FinanceTab() {
                           {new Date(c.cycle_end_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })}
                         </td>
                         <td className="px-4 py-3.5 text-right text-gray-400 text-xs tabular-nums">{fmt(c.views_earned)}</td>
-                        <td className="px-5 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
+                        <td className="px-4 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
                           {fmtMoney(c.payout_amount)}
+                        </td>
+                        <td className="px-5 py-3.5 text-center">
+                          <WiseMatchBadge match={c.wise} />
                         </td>
                       </tr>
                     ))}
@@ -1418,11 +1448,57 @@ function FinanceTab() {
                   <tfoot>
                     <tr className="border-t border-white/[0.07] bg-white/[0.02]">
                       <td colSpan={3} className="px-5 py-3 text-xs text-gray-500">Total paid</td>
-                      <td className="px-5 py-3 text-right font-bold text-emerald-400 tabular-nums">
+                      <td className="px-4 py-3 text-right font-bold text-emerald-400 tabular-nums">
                         {fmtMoney(paidCycles.reduce((s, c) => s + c.payout_amount, 0))}
                       </td>
+                      <td />
                     </tr>
                   </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Real Wise transactions */}
+          <div>
+            <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-3">Wise Transactions</p>
+            {transactions.length === 0 ? (
+              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
+                No Wise transactions found.
+              </div>
+            ) : (
+              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/[0.07]">
+                      <th className="text-left px-5 py-3 text-xs text-gray-500">Recipient</th>
+                      <th className="text-left px-4 py-3 text-xs text-gray-500">Date</th>
+                      <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
+                      <th className="text-center px-5 py-3 text-xs text-gray-500">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map(t => (
+                      <tr key={t.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                        <td className="px-5 py-3.5">
+                          <p className="text-white font-medium text-sm">{t.recipientName || "—"}</p>
+                          {t.reference && <p className="text-gray-600 text-xs mt-0.5 truncate max-w-[200px]">{t.reference}</p>}
+                        </td>
+                        <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
+                          {t.created ? new Date(t.created).toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                        </td>
+                        <td className="px-4 py-3.5 text-right text-white tabular-nums">
+                          {new Intl.NumberFormat("en-AU", { style: "currency", currency: t.sourceCurrency || "USD" }).format(t.sourceValue)}
+                          {t.targetCurrency && t.targetCurrency !== t.sourceCurrency && (
+                            <span className="text-gray-600 text-xs ml-1">→ {t.targetCurrency}</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 text-center">
+                          <WiseStatusBadge status={t.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               </div>
             )}
@@ -1431,6 +1507,28 @@ function FinanceTab() {
       ) : null}
     </div>
   );
+}
+
+// ── Reconciliation status pills ──────────────────────────────────────────────
+function WiseMatchBadge({ match }: { match?: PayoutWiseMatch | null }) {
+  if (!match || match.status === "none") {
+    return <span className="text-gray-600 text-xs">⏳ Awaiting</span>;
+  }
+  if (match.status === "confirmed") {
+    return <span className="text-emerald-400 text-xs font-medium">✓ Confirmed</span>;
+  }
+  if (match.status === "cancelled") {
+    return <span className="text-red-400/80 text-xs">✕ Cancelled</span>;
+  }
+  return <span className="text-yellow-400/80 text-xs">• In progress</span>;
+}
+
+function WiseStatusBadge({ status }: { status: string }) {
+  const sent = status === "outgoing_payment_sent";
+  const cancelled = status === "cancelled" || status === "bounced_back";
+  const label = status.replace(/_/g, " ");
+  const cls = sent ? "text-emerald-400" : cancelled ? "text-red-400/80" : "text-yellow-400/80";
+  return <span className={`${cls} text-xs capitalize`}>{label}</span>;
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────

@@ -1,16 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-
-const WISE_BASE = "https://api.transferwise.com";
-
-async function getWiseToken(): Promise<string | null> {
-  try {
-    const db = createServerClient();
-    const { data } = await db.from("app_settings").select("value").eq("key", "wise_api_token").single();
-    if (data?.value) return data.value;
-  } catch {}
-  return process.env.WISE_API_TOKEN ?? null;
-}
+import { WISE_BASE, getWiseToken, fetchWiseProfiles, pickWiseProfile, wiseSignedFetch } from "@/lib/wise";
 
 async function attemptWiseTransfer(
   amount: number,
@@ -22,12 +12,13 @@ async function attemptWiseTransfer(
   if (!token) return { transfer_id: null, error: "Wise not configured" };
 
   try {
-    const profRes = await fetch(`${WISE_BASE}/v1/profiles`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!profRes.ok) return { transfer_id: null, error: "Wise auth failed" };
-    const profiles = await profRes.json();
-    const profile = profiles.find((p: any) => p.type?.toLowerCase() === "business") ?? profiles[0];
+    let profiles: any[];
+    try {
+      profiles = await fetchWiseProfiles(token);
+    } catch {
+      return { transfer_id: null, error: "Wise auth failed" };
+    }
+    const profile = pickWiseProfile(profiles);
     if (!profile) return { transfer_id: null, error: "No Wise business profile found" };
 
     // Create recipient
@@ -47,12 +38,13 @@ async function attemptWiseTransfer(
     }
     const recipient = await recpRes.json();
 
-    // Create quote
-    const quoteRes = await fetch(`${WISE_BASE}/v3/quotes`, {
+    // Create quote. Must be the profile-scoped endpoint — POST /v3/quotes
+    // (profile in body) produces a quote Wise rejects at transfer time with
+    // "Quote is missing profile."
+    const quoteRes = await fetch(`${WISE_BASE}/v3/profiles/${profile.id}/quotes`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        profile: profile.id,
         sourceCurrency: "USD",
         targetCurrency: "USD",
         sourceAmount: amount,
@@ -80,20 +72,21 @@ async function attemptWiseTransfer(
     }
     const transfer = await txRes.json();
 
-    // Fund from balance
-    const fundRes = await fetch(
+    // Fund from balance. This is SCA-protected: wiseSignedFetch answers Wise's
+    // signature challenge using the private key in WISE_PRIVATE_KEY.
+    const fundRes = await wiseSignedFetch(
       `${WISE_BASE}/v3/profiles/${profile.id}/transfers/${transfer.id}/payments`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "BALANCE" }),
-      },
+      token,
+      { type: "BALANCE" },
     );
     if (!fundRes.ok) {
       const body = await fundRes.text();
+      const hint = fundRes.status === 403
+        ? "SCA signature rejected — check the public key is uploaded to Wise and WISE_PRIVATE_KEY matches it"
+        : "insufficient balance or other Wise error";
       return {
         transfer_id: String(transfer.id),
-        error: `Funded but transfer not sent (SCA or insufficient balance): ${body}`,
+        error: `Funded but transfer not sent (${hint}): ${body}`,
       };
     }
 
@@ -147,6 +140,7 @@ export async function POST(req: NextRequest) {
           bonus_note: bonus_note || null,
           payout_amount: total,
           status: "paid",
+          paid_at: new Date().toISOString(),
         },
         { onConflict: "creator_id,cycle_start_date" },
       )
@@ -189,6 +183,7 @@ export async function POST(req: NextRequest) {
       bonus_note: bonus_note || null,
       payout_amount: total,
       status: "paid",
+      paid_at: new Date().toISOString(),
     }).eq("id", cycle_id);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -12,6 +12,8 @@ CREATE TABLE creators (
   monthly_target INTEGER DEFAULT 30,
   active BOOLEAN DEFAULT true,
   joined_at DATE,
+  wise_email TEXT,                    -- creator's Wise email (payouts)
+  wise_tag TEXT,                      -- creator's Wisetag (without leading @)
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -56,8 +58,13 @@ CREATE TABLE payout_cycles (
   views_earned BIGINT NOT NULL,           -- end_views - start_views
   base_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
   view_bonus DECIMAL(10,2) NOT NULL DEFAULT 0,
+  bonus_amount DECIMAL(10,2) NOT NULL DEFAULT 0,    -- discretionary bonus added at pay time
+  bonus_note TEXT,
   payout_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid')),
+  paid_at TIMESTAMP WITH TIME ZONE,
+  wise_transfer_id TEXT,                            -- linked Wise transfer (reconciliation)
+  wise_transfer_status TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(creator_id, cycle_start_date)
 );

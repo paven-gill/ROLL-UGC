@@ -26,6 +26,10 @@ interface Props {
   onPaid: () => void;
 }
 
+// Interim: payouts are recorded in the dashboard but sent manually in Wise.
+// Opening this in a new tab drops you into Wise's Send money flow.
+const WISE_SEND_URL = "https://wise.com/send";
+
 function fmt(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -48,7 +52,6 @@ type PayResult = {
 export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
   const [bonusAmount, setBonusAmount] = useState("");
   const [bonusNote, setBonusNote]   = useState("");
-  const [wiseEmail, setWiseEmail]   = useState("");
   const [paying, setPaying]         = useState(false);
   const [result, setResult]         = useState<PayResult | null>(null);
 
@@ -75,14 +78,18 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
           view_bonus: cycle.view_bonus,
           bonus_amount: bonus,
           bonus_note: bonusNote,
-          recipient_wise_email: wiseEmail.trim() || null,
+          // Interim: don't trigger the (currently blocked) Wise API send —
+          // record only, then open Wise so the user pays manually.
+          recipient_wise_email: null,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
         setResult({ paid: false, wise_sent: false, wise_error: data.error ?? "Failed", wise_transfer_id: null });
       } else {
-        setResult({ paid: true, wise_sent: data.wise_sent, wise_error: data.wise_error, wise_transfer_id: data.wise_transfer_id });
+        setResult({ paid: true, wise_sent: false, wise_error: null, wise_transfer_id: null });
+        // Open Wise in a new tab so they can complete the payment manually.
+        window.open(WISE_SEND_URL, "_blank", "noopener,noreferrer");
       }
     } catch {
       setResult({ paid: false, wise_sent: false, wise_error: "Network error", wise_transfer_id: null });
@@ -111,37 +118,36 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
           /* ── Result ── */
           <div className="px-6 py-6 space-y-4">
             {result.paid ? (
-              <div className="flex items-start gap-3">
-                <CheckCircle2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />
-                <div className="space-y-1.5">
-                  <p className="text-white font-medium text-sm">
-                    {result.wise_sent ? "Payment sent via Wise" : "Payout recorded"}
-                  </p>
-                  {result.wise_sent ? (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />
+                  <div className="space-y-1">
+                    <p className="text-white font-medium text-sm">Payout recorded ✓</p>
                     <p className="text-gray-500 text-xs">
-                      ${total.toFixed(2)} sent to {wiseEmail}. Check Wise for transfer status.
+                      Wise opened in a new tab — finish the payment there.
                     </p>
-                  ) : result.wise_error ? (
-                    <>
-                      <p className="text-yellow-400/80 text-xs">
-                        Payout marked as paid — but Wise transfer didn&apos;t complete:
-                      </p>
-                      <p className="text-gray-600 text-xs font-mono bg-white/[0.03] border border-white/[0.06] rounded-lg p-2.5 leading-relaxed">
-                        {result.wise_error}
-                      </p>
-                      <p className="text-gray-600 text-xs">
-                        Please send ${total.toFixed(2)} manually via Wise to {wiseEmail || "the creator"}.
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-gray-500 text-xs">
-                      No Wise email provided — payout recorded, send manually.
-                    </p>
-                  )}
-                  {result.wise_transfer_id && (
-                    <p className="text-gray-700 text-xs">Transfer ID: {result.wise_transfer_id}</p>
-                  )}
+                  </div>
                 </div>
+
+                {/* What to enter in Wise */}
+                <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 space-y-2">
+                  <p className="text-gray-500 text-[11px] uppercase tracking-wide">Send in Wise</p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Recipient</span>
+                    <span className="text-white font-medium">{cycle.creator_name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Amount</span>
+                    <span className="text-emerald-400 font-bold tabular-nums">${total.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => window.open(WISE_SEND_URL, "_blank", "noopener,noreferrer")}
+                  className="w-full border border-white/[0.12] hover:border-white/[0.25] text-gray-300 hover:text-white px-4 py-2 rounded-lg text-xs transition-all"
+                >
+                  Open Wise again
+                </button>
               </div>
             ) : (
               <div className="flex items-start gap-3">
@@ -213,22 +219,12 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
               </div>
             </div>
 
-            {/* Wise email */}
-            <div className="space-y-1.5">
-              <label className="text-xs text-gray-500 flex items-center gap-1.5">
-                <Building2 size={11} />
-                Creator&apos;s Wise email
-              </label>
-              <input
-                type="email"
-                placeholder="creator@email.com"
-                value={wiseEmail}
-                onChange={e => setWiseEmail(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && !paying && handlePay()}
-                className="w-full bg-white/[0.04] border border-white/[0.08] focus:border-emerald-500/40 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none transition-colors"
-              />
-              <p className="text-gray-700 text-[11px]">
-                Leave blank to record without sending — you can pay manually via Wise.
+            {/* Manual-pay note */}
+            <div className="flex items-start gap-2 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
+              <Building2 size={12} className="text-gray-500 mt-0.5 shrink-0" />
+              <p className="text-gray-500 text-[11px] leading-relaxed">
+                This records the payout and opens <span className="text-gray-300">Wise</span> in a new tab,
+                where you send the payment manually to <span className="text-gray-300">{cycle.creator_name}</span>.
               </p>
             </div>
 
@@ -245,7 +241,7 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
                 disabled={paying}
                 className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-semibold px-4 py-2.5 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)]"
               >
-                {paying ? "Processing…" : `Pay $${total.toFixed(2)}`}
+                {paying ? "Recording…" : `Mark $${total.toFixed(2)} paid & open Wise`}
               </button>
             </div>
           </div>

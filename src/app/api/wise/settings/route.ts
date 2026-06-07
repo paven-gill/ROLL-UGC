@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-
-const WISE_BASE = "https://api.transferwise.com";
+import { fetchWiseProfiles, pickWiseProfile, wiseProfileName } from "@/lib/wise";
 
 // POST — validate token against Wise then save to Supabase
 export async function POST(req: NextRequest) {
@@ -10,31 +9,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "token_required" }, { status: 400 });
   }
 
-  // Validate the token by calling Wise
+  // Validate the token by calling Wise (v2/profiles — see lib/wise.ts)
   let profiles: any[];
   try {
-    const res = await fetch(`${WISE_BASE}/v1/profiles`, {
-      headers: { Authorization: `Bearer ${token.trim()}` },
-    });
-    if (!res.ok) {
+    profiles = await fetchWiseProfiles(token.trim());
+  } catch (e: any) {
+    if (e?.status === 401 || e?.status === 403) {
       return NextResponse.json({ error: "invalid_token" }, { status: 401 });
     }
-    profiles = await res.json();
-  } catch {
     return NextResponse.json({ error: "wise_unreachable" }, { status: 502 });
   }
 
-  const profile = profiles.find((p: any) => p.type?.toLowerCase() === "business") ?? profiles[0];
-  const name =
-    profile?.type === "BUSINESS"
-      ? profile.details?.name
-      : `${profile?.details?.firstName ?? ""} ${profile?.details?.lastName ?? ""}`.trim();
+  const profile = pickWiseProfile(profiles);
 
   // Save to Supabase
   const db = createServerClient();
   await db.from("app_settings").upsert({ key: "wise_api_token", value: token.trim(), updated_at: new Date().toISOString() });
 
-  return NextResponse.json({ connected: true, profile: { id: profile?.id, type: profile?.type, name } });
+  return NextResponse.json({
+    connected: true,
+    profile: { id: profile?.id, type: profile?.type, name: wiseProfileName(profile) },
+  });
 }
 
 // DELETE — remove token from Supabase
