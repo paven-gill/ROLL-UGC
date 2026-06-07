@@ -1207,6 +1207,8 @@ interface PaidCycle {
   view_bonus: number;
   views_earned: number;
   status: string;
+  paid_at: string | null;
+  created_at: string;
   creators: { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
   wise?: PayoutWiseMatch | null;
 }
@@ -1419,6 +1421,7 @@ function FinanceTab() {
                     <tr className="border-b border-white/[0.07]">
                       <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
                       <th className="text-left px-4 py-3 text-xs text-gray-500">Period</th>
+                      <th className="text-left px-4 py-3 text-xs text-gray-500">Paid</th>
                       <th className="text-right px-4 py-3 text-xs text-gray-500">Views</th>
                       <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
                       <th className="text-center px-5 py-3 text-xs text-gray-500">Wise</th>
@@ -1435,6 +1438,11 @@ function FinanceTab() {
                           {" → "}
                           {new Date(c.cycle_end_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })}
                         </td>
+                        <td className="px-4 py-3.5 text-gray-400 text-xs whitespace-nowrap">
+                          {(c.paid_at ?? c.created_at)
+                            ? new Date(c.paid_at ?? c.created_at).toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })
+                            : "—"}
+                        </td>
                         <td className="px-4 py-3.5 text-right text-gray-400 text-xs tabular-nums">{fmt(c.views_earned)}</td>
                         <td className="px-4 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
                           {fmtMoney(c.payout_amount)}
@@ -1447,7 +1455,7 @@ function FinanceTab() {
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-white/[0.07] bg-white/[0.02]">
-                      <td colSpan={3} className="px-5 py-3 text-xs text-gray-500">Total paid</td>
+                      <td colSpan={4} className="px-5 py-3 text-xs text-gray-500">Total paid</td>
                       <td className="px-4 py-3 text-right font-bold text-emerald-400 tabular-nums">
                         {fmtMoney(paidCycles.reduce((s, c) => s + c.payout_amount, 0))}
                       </td>

@@ -19,6 +19,7 @@ export async function GET() {
       view_bonus,
       views_earned,
       status,
+      paid_at,
       created_at,
       creators (
         name,
