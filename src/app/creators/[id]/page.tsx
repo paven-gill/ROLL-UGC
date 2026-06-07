@@ -507,7 +507,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
           <StatCard
             Icon={Eye}       label="All-Time Views"
             value={fmt(allViews)}
-            sub={`${cycleData ? cycleData.cycleHistory.length : 0} cycles completed`}
+            sub={`${(cycleData?.cycleHistory ?? []).filter(c => c.status !== "in_progress").length} cycles completed`}
           />
           <StatCard
             Icon={FileVideo} label="All-Time Posts"
