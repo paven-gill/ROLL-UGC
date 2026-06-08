@@ -48,16 +48,44 @@ export async function GET(req: Request) {
 
   const db = createServerClient();
 
-  const [{ data: creators }, { data: snapshots }] = await Promise.all([
-    db.from("creators")
-      .select("id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views")
-      .order("name"),
-    db.from("view_snapshots")
-      .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
-      .order("snapshot_date", { ascending: true }),
-  ]);
+  // Base retainers are attributed to the date a cycle COMPLETES (cycle_end_date),
+  // matching the view-bonus accrual clock and the chart's "Cycle complete" dots.
+  // Count completed cycles (pending or paid) whose end date falls strictly after
+  // the baseline and on/before the window end — same boundary semantics as the
+  // cumulative-views delta (baseline exclusive, end inclusive).
+  const [{ data: creators }, { data: snapshots }, { data: completedCycles }, { data: activeCycles }] =
+    await Promise.all([
+      db.from("creators")
+        .select("id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views")
+        .order("name"),
+      db.from("view_snapshots")
+        .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
+        .order("snapshot_date", { ascending: true }),
+      db.from("payout_cycles")
+        .select("creator_id, cycle_start_date, cycle_end_date, base_fee, status")
+        .gt("cycle_end_date", baselineDate)
+        .lte("cycle_end_date", endDate)
+        .in("status", ["pending", "paid"]),
+      db.from("creator_cycles").select("creator_id, cycle_start_date"),
+    ]);
 
   if (!creators) return NextResponse.json({ results: [], windowAccurate: false });
+
+  // A payout_cycles row whose start matches the creator's current active cycle is
+  // really the in-progress cycle, not a completed one — don't count its base
+  // (mirrors the payout-events route so Home agrees with the creator page).
+  const activeStartByCreator = new Map<string, string>();
+  for (const ac of activeCycles ?? []) {
+    activeStartByCreator.set(ac.creator_id as string, ac.cycle_start_date as string);
+  }
+  const baseByCreator = new Map<string, number>();
+  for (const c of completedCycles ?? []) {
+    if (activeStartByCreator.get(c.creator_id as string) === c.cycle_start_date) continue;
+    baseByCreator.set(
+      c.creator_id as string,
+      (baseByCreator.get(c.creator_id as string) ?? 0) + (c.base_fee ?? 0),
+    );
+  }
 
   // Build per creator+platform ascending lists for nearest-prior lookups.
   type Snap = { date: string; views: number; posts: number };
@@ -130,6 +158,7 @@ export async function GET(req: Request) {
       ig_views, tt_views, total_views,
       ig_posts, tt_posts, total_posts,
       payout,
+      base_total: baseByCreator.get(creator.id) ?? 0,
     };
   });
 

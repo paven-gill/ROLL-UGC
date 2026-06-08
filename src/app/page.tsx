@@ -42,6 +42,7 @@ interface RangeSummary {
   tt_posts: number;
   total_posts: number;
   payout: number;
+  base_total: number;
 }
 
 interface PostRow {
@@ -450,6 +451,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<"all" | "instagram" | "tiktok">("all");
+  const [includeBase, setIncludeBase] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -578,8 +580,13 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
   const totalPayout = filteredSummaries.reduce((s, x) => s + x.payout, 0);
   const igPayout    = filteredSummaries.reduce((s, x) => s + (x.total_views > 0 ? x.payout * x.ig_views / x.total_views : 0), 0);
   const ttPayout    = filteredSummaries.reduce((s, x) => s + (x.total_views > 0 ? x.payout * x.tt_views / x.total_views : 0), 0);
+  const baseTotal   = filteredSummaries.reduce((s, x) => s + (x.base_total ?? 0), 0);
+  // Base retainers aren't tied to a platform, so they only fold into the combined
+  // ("all platforms") total — not into an IG-only or TikTok-only view.
+  const baseApplies = includeBase && platformFilter === "all";
   const displayViews  = platformFilter === "instagram" ? igTotal  : platformFilter === "tiktok" ? ttTotal  : totalViews;
-  const displayPayout = platformFilter === "instagram" ? igPayout : platformFilter === "tiktok" ? ttPayout : totalPayout;
+  const displayPayout = (platformFilter === "instagram" ? igPayout : platformFilter === "tiktok" ? ttPayout : totalPayout)
+    + (baseApplies ? baseTotal : 0);
   const cpm = displayViews > 0 ? (displayPayout / displayViews) * 1000 : 0;
 
   function filterPostsByRange(posts: PostRow[]): PostRow[] {
@@ -655,6 +662,24 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
           >
             <Music2 size={14}/>
           </button>
+          <button
+            onClick={() => setIncludeBase(b => !b)}
+            disabled={platformFilter !== "all"}
+            title={
+              platformFilter !== "all"
+                ? "Base retainers apply to the combined total only — clear the platform filter"
+                : includeBase
+                ? "Including base retainers in Total Payouts"
+                : "Include base retainers in Total Payouts"
+            }
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors border disabled:opacity-30 disabled:cursor-not-allowed ${
+              includeBase && platformFilter === "all"
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(52,211,153,0.12)]"
+                : "bg-white/[0.05] text-gray-600 border-white/[0.1] hover:text-gray-300 hover:border-white/[0.13] hover:bg-white/[0.05]"
+            }`}
+          >
+            <DollarSign size={14}/>
+          </button>
           <CreatorPicker
             creators={creators}
             value={selectedCreatorId}
@@ -673,8 +698,8 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
       {/* 4 stat cards */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 transition-opacity ${statsLoading ? "opacity-50" : ""}`}>
         <Stat label={platformFilter === "instagram" ? "Instagram Views" : platformFilter === "tiktok" ? "TikTok Views" : "Total Views"} value={fmt(displayViews)} Icon={Eye} sub={rangeApprox ? "approx · sync daily for accuracy" : platformFilter !== "all" ? periodLabel : (ttTotal > 0 ? `IG ${fmt(igTotal)} · TT ${fmt(ttTotal)}` : periodLabel)} />
-        <Stat label={platformFilter === "instagram" ? "Instagram Payouts" : platformFilter === "tiktok" ? "TikTok Payouts" : "Total Payouts"} value={fmtMoney(displayPayout)} Icon={DollarSign} accent />
-        <Stat label="CPM"          value={`$${cpm.toFixed(2)}`}  Icon={TrendingUp} sub="Cost per 1K views" />
+        <Stat label={platformFilter === "instagram" ? "Instagram Payouts" : platformFilter === "tiktok" ? "TikTok Payouts" : "Total Payouts"} value={fmtMoney(displayPayout)} Icon={DollarSign} accent sub={baseApplies ? `Base ${fmtMoney(baseTotal)} · CPM ${fmtMoney(totalPayout)}` : undefined} />
+        <Stat label="CPM"          value={`$${cpm.toFixed(2)}`}  Icon={TrendingUp} sub={baseApplies ? "Effective · incl. base" : "Cost per 1K views"} />
         <Stat label="Total Posts"  value={String(totalPosts)}    Icon={FileVideo} />
       </div>
 
