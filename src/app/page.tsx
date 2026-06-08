@@ -7,7 +7,7 @@ import {
   RefreshCw, Plus, Instagram, Music2,
   Eye, FileVideo, TrendingUp, ChevronRight, ChevronDown, CalendarDays,
   ArrowUpDown, Pencil, Heart, MessageCircle, CheckCircle2, Clock,
-  Wallet, Building2, Download,
+  Wallet, Building2, Download, Search, X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -869,13 +869,22 @@ function CreatorsTab({
   const [sortKey, setSortKey] = useState<CreatorSortKey>("status");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [editingCreator, setEditingCreator] = useState<CreatorRow | null>(null);
+  const [search, setSearch] = useState("");
 
   function handleSort(key: CreatorSortKey) {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDir(key === "name" || key === "joined_at" || key === "status" ? "asc" : "desc"); }
   }
 
-  const rows = creators.map(c => ({ creator: c, ...getAllTimeSummary(c) }));
+  const q = search.trim().toLowerCase();
+  const filteredCreators = q
+    ? creators.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        (c.instagram_username ?? "").toLowerCase().includes(q) ||
+        (c.tiktok_username ?? "").toLowerCase().includes(q))
+    : creators;
+
+  const rows = filteredCreators.map(c => ({ creator: c, ...getAllTimeSummary(c) }));
 
   const sorted = [...rows].sort((a, b) => {
     let cmp = 0;
@@ -917,14 +926,37 @@ function CreatorsTab({
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">{creators.length} creators</p>
-        <button
-          onClick={onAdd}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)]"
-        >
-          <Plus size={14}/> Add Creator
-        </button>
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm text-gray-500 whitespace-nowrap">
+          {q ? `${filteredCreators.length} of ${creators.length} creators` : `${creators.length} creators`}
+        </p>
+        <div className="flex items-center gap-3 flex-1 justify-end">
+          <div className="relative w-full max-w-xs">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search creators…"
+              className="w-full bg-[#0d0d15]/80 border border-white/[0.14] rounded-lg pl-9 pr-8 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/50 transition-colors"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={onAdd}
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)] whitespace-nowrap"
+          >
+            <Plus size={14}/> Add Creator
+          </button>
+        </div>
       </div>
 
       <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
@@ -932,6 +964,11 @@ function CreatorsTab({
           <div className="py-16 text-center text-gray-600">
             No creators yet.{" "}
             <button onClick={onAdd} className="text-emerald-400 hover:underline">Add one</button>
+          </div>
+        ) : sorted.length === 0 ? (
+          <div className="py-16 text-center text-gray-600">
+            No creators match “{search}”.{" "}
+            <button onClick={() => setSearch("")} className="text-emerald-400 hover:underline">Clear search</button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1056,6 +1093,7 @@ function CreatorsTab({
 // ─── Payouts tab ──────────────────────────────────────────────────────────────
 
 function PayoutsTab() {
+  const router = useRouter();
   const now = new Date();
   const today = now.toISOString().split("T")[0];
   const [selYear,  setSelYear]   = useState(now.getFullYear());
@@ -1127,7 +1165,12 @@ function PayoutsTab() {
                   <tr key={cycle.id} className="border-b border-white/[0.04] hover:bg-white/[0.03]">
                     {/* Creator */}
                     <td className="px-5 py-3.5">
-                      <div className="font-medium text-white">{cycle.creator_name}</div>
+                      <button
+                        onClick={() => router.push(`/creators/${cycle.creator_id}`)}
+                        className="font-medium text-white hover:text-emerald-400 hover:underline underline-offset-2 transition-colors text-left"
+                      >
+                        {cycle.creator_name}
+                      </button>
                       {cycle.instagram_username && (
                         <div className="text-blue-400/60 text-xs flex items-center gap-0.5 mt-0.5">
                           <Instagram size={9} /> @{cycle.instagram_username}
