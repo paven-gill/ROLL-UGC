@@ -122,6 +122,14 @@ export async function POST(req: NextRequest) {
   const total = parseFloat((base_fee + view_bonus + (bonus_amount ?? 0)).toFixed(2));
   let finalCycleId = cycle_id;
 
+  // View counts are NOT NULL in the DB. The destructuring defaults above only
+  // cover `undefined`; a creator with no view data (e.g. didn't finish the 30
+  // posts, so no view bonus) comes through as explicit `null`. Coalesce to 0 so
+  // the payout still goes through at the correct (no-bonus) amount.
+  const safeStartViews = start_views ?? 0;
+  const safeEndViews = end_views ?? 0;
+  const safeViewsEarned = views_earned ?? 0;
+
   if (type === "in_progress") {
     // Close the cycle: create payout_cycles record
     const { data: newCycle, error: insertErr } = await db
@@ -131,9 +139,9 @@ export async function POST(req: NextRequest) {
           creator_id,
           cycle_start_date,
           cycle_end_date,
-          start_views,
-          end_views,
-          views_earned,
+          start_views: safeStartViews,
+          end_views: safeEndViews,
+          views_earned: safeViewsEarned,
           base_fee,
           view_bonus,
           bonus_amount: bonus_amount ?? 0,
