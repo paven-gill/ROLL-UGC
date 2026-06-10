@@ -37,7 +37,7 @@ export async function GET(req: Request) {
       .order("cycle_end_date"),
     // Active cycles ending in this month (for in-progress estimates)
     db.from("creator_cycles")
-      .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views)")
+      .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status)")
       .gte("cycle_end_date", firstDay)
       .lt("cycle_end_date", nextFirstDay),
     // Latest daily snapshot per creator+platform for current-views calculation
@@ -66,9 +66,14 @@ export async function GET(req: Request) {
       const cr = cycle.creators as {
         name: string; instagram_username: string | null; tiktok_username: string | null;
         base_fee: number; rate_per_thousand_views: number;
+        active: boolean | null; status: "active" | "paused" | "finished" | null;
       } | null;
       if (!cr) return [];
       if (completedCreatorIds.has(cycle.creator_id)) return [];
+      // Paused / finished creators aren't running cycles anymore — don't project
+      // their frozen cycle as an upcoming payout. (Stamped pending/paid cycles
+      // still appear above, since those are real amounts owed or already paid.)
+      if (cr.active === false || cr.status === "paused" || cr.status === "finished") return [];
 
       const currentViews = latestTotalViews(cycle.creator_id);
       const views_so_far = Math.max(0, currentViews - (cycle.baseline_views ?? 0));

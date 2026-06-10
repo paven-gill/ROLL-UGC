@@ -127,8 +127,26 @@ export async function storeSnapshot(
 
 export async function processCycle(
   db: ReturnType<typeof createServerClient>,
-  creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
+  creator: {
+    id: string;
+    joined_at: string | null;
+    base_fee: number;
+    rate_per_thousand_views: number;
+    active?: boolean;
+    status?: "active" | "paused" | "finished" | null;
+  }
 ) {
+  // Paused / finished creators aren't working with us anymore — never onboard a
+  // first cycle, stamp a payout, or roll into a new one. Their existing cycle is
+  // left frozen as-is. (The nightly cron already filters to active creators, but
+  // the manual "Sync now" button doesn't, so guard here too.)
+  const isInactive = creator.active === false ||
+    creator.status === "paused" || creator.status === "finished";
+  if (isInactive) {
+    console.log(`[cycle] ${creator.id}: skipped (creator inactive)`);
+    return { action: "skipped_inactive" };
+  }
+
   const today = businessDate();
 
   // Current total eligible views = latest daily snapshot per platform, summed.
