@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { businessDate } from "@/lib/date";
 
 // GET /api/dashboard/chart-range?days=14[&creator_id=uuid]
 // OR  /api/dashboard/chart-range?year=2026&month=4[&creator_id=uuid]
@@ -23,9 +24,10 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const creatorId = searchParams.get("creator_id") ?? null;
 
-  // Use UTC date string to avoid local-timezone vs UTC mismatch (Vercel=UTC, dev=local tz)
-  const todayUTC = new Date().toISOString().split("T")[0];
-  const [ty, tm, td] = todayUTC.split("-").map(Number);
+  // Anchor "today" to the business calendar day so the latest sync isn't clipped
+  // when the cron runs just before UTC midnight (see lib/date.ts).
+  const todayStr = businessDate();
+  const [ty, tm, td] = todayStr.split("-").map(Number);
   let dates: string[] = [];
 
   const daysParam  = searchParams.get("days");

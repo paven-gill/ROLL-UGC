@@ -1,6 +1,7 @@
 import { createServerClient } from "@/lib/supabase";
 import { type ScrapedData } from "@/lib/apify";
 import { uploadTopTikTokThumbs } from "@/lib/thumbnail-storage";
+import { businessDate } from "@/lib/date";
 
 // ─── Store one platform's daily snapshot ─────────────────────────────────────
 // Shared by the per-creator sync route (manual + Instagram) and the batched
@@ -14,10 +15,10 @@ export async function storeSnapshot(
   data: ScrapedData
 ) {
   const nowTs = new Date();
-  const today = nowTs.toISOString().split("T")[0];
+  // Date the snapshot by the Australian calendar day, not UTC — see lib/date.ts.
+  const today = businessDate(nowTs);
   const now = nowTs.toISOString();
-  const currentYear = nowTs.getUTCFullYear();
-  const currentMonth = nowTs.getUTCMonth() + 1;
+  const [currentYear, currentMonth] = today.split("-").map(Number);
 
   // Compute adjusted cumulative_views by subtracting views of excluded posts
   const { data: excludedForViews } = await db
@@ -128,7 +129,7 @@ export async function processCycle(
   db: ReturnType<typeof createServerClient>,
   creator: { id: string; joined_at: string | null; base_fee: number; rate_per_thousand_views: number }
 ) {
-  const today = new Date().toISOString().split("T")[0];
+  const today = businessDate();
 
   // Current total eligible views = latest daily snapshot per platform, summed.
   const { data: snaps } = await db

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { businessDate } from "@/lib/date";
 
 // GET /api/dashboard/range?days=30
 // OR  /api/dashboard/range?year=2026&month=5
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   const yearParam = searchParams.get("year");
   const monthParam = searchParams.get("month");
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = businessDate();
 
   // Resolve the window: baselineDate (exclusive lower bound — cumulative views
   // as of this date are the starting point) and endDate (inclusive upper bound).
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
     const days = Math.min(90, Math.max(1, parseInt(searchParams.get("days") || "30", 10)));
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    baselineDate = cutoff.toISOString().split("T")[0];
+    baselineDate = businessDate(cutoff);
     endDate = todayStr;
   }
 
