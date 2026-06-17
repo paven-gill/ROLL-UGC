@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 
 export async function POST(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const body = await req.json();
   const { post_id, creator_id, platform } = body as {
     post_id: string;
@@ -14,6 +17,7 @@ export async function POST(req: Request) {
   }
 
   const db = createServerClient();
+  await assertCreatorInScope(db, ctx, creator_id);
 
   // Read view count + taken_at BEFORE deleting — needed to adjust all aggregates
   const { data: postData } = await db
@@ -129,4 +133,8 @@ export async function POST(req: Request) {
   );
 
   return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

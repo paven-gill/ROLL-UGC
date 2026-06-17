@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuth, isAuthError } from "@/lib/auth";
 
 const ALLOWED_HOSTS = [
   "fbcdn.net",
@@ -10,6 +11,8 @@ const ALLOWED_HOSTS = [
 ];
 
 export async function GET(req: Request) {
+  try {
+  await requireAuth(req);
   const { searchParams } = new URL(req.url);
   const url = searchParams.get("url");
 
@@ -43,4 +46,8 @@ export async function GET(req: Request) {
       "Cache-Control": "public, max-age=3600",
     },
   });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

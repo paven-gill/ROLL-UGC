@@ -21,3 +21,10 @@ export function businessDate(d: Date = new Date()): string {
     day: "2-digit",
   }).format(d);
 }
+
+// Day-of-month (1–31) for the given instant in the business timezone. Derived
+// from businessDate() so it shares the same "today" as everything else on the
+// board — the day a sync is filed under, not the UTC day.
+export function businessDayOfMonth(d: Date = new Date()): number {
+  return Number(businessDate(d).slice(-2));
+}

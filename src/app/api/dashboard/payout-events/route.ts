@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
 
 // GET /api/dashboard/payout-events?from=YYYY-MM-DD&to=YYYY-MM-DD[&creator_id=uuid]
 //
@@ -7,6 +8,8 @@ import { createServerClient } from "@/lib/supabase";
 // Used by the home chart to render payout dot markers on cycle completion dates.
 
 export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const { searchParams } = new URL(req.url);
   const from = searchParams.get("from");
   const to = searchParams.get("to");
@@ -17,6 +20,7 @@ export async function GET(req: Request) {
   }
 
   const db = createServerClient();
+  const ids = await allowedCreatorIds(db, ctx);
 
   let q = db
     .from("payout_cycles")
@@ -27,10 +31,11 @@ export async function GET(req: Request) {
     .order("cycle_end_date");
 
   if (creatorId) q = q.eq("creator_id", creatorId);
+  q = scopeToCreators(q, ids);
 
   const [{ data }, { data: activeCycles }] = await Promise.all([
     q,
-    db.from("creator_cycles").select("creator_id, cycle_start_date"),
+    scopeToCreators(db.from("creator_cycles").select("creator_id, cycle_start_date"), ids),
   ]);
 
   // A payout_cycles row whose start date matches the creator's current active
@@ -56,4 +61,8 @@ export async function GET(req: Request) {
     });
 
   return NextResponse.json(events);
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

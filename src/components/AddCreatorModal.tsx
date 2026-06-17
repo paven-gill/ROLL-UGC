@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -30,7 +31,7 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
     setLoading(true);
     setError("");
 
-    const res = await fetch("/api/creators", {
+    const res = await apiFetch("/api/creators", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

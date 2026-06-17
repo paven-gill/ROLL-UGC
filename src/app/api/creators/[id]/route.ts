@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
+  try {
+  const ctx = await requireAuth(req);
   const db = createServerClient();
+  await assertCreatorInScope(db, ctx, params.id);
 
   const { data: creator, error: cErr } = await db
     .from("creators")
@@ -23,13 +27,20 @@ export async function GET(
     .order("month", { ascending: false });
 
   return NextResponse.json({ ...creator, metrics: metrics || [] });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }
 
 export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
+  try {
+  const ctx = await requireAuth(req);
   const db = createServerClient();
+  await assertCreatorInScope(db, ctx, params.id);
   const body = await req.json();
 
   const { data, error } = await db
@@ -41,14 +52,25 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
+  try {
+  const ctx = await requireAuth(req);
   const db = createServerClient();
+  await assertCreatorInScope(db, ctx, params.id);
   const { error } = await db.from("creators").delete().eq("id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

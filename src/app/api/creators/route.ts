@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import {
+  requireAuth,
+  allowedCreatorIds,
+  scopeToCreators,
+  isAuthError,
+} from "@/lib/auth";
 
-export async function GET() {
+export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const db = createServerClient();
+  const ids = await allowedCreatorIds(db, ctx);
+
+  const creatorsQ = db.from("creators").select("*").order("name");
 
   const [
     { data: creators, error },
@@ -12,12 +23,12 @@ export async function GET() {
     { data: snapshots },
     { data: postRows },
   ] = await Promise.all([
-    db.from("creators").select("*").order("name"),
-    db.from("monthly_metrics").select("*").order("year", { ascending: false }).order("month", { ascending: false }),
-    db.from("payout_cycles").select("creator_id, payout_amount, views_earned, status"),
-    db.from("creator_cycles").select("creator_id, baseline_views"),
-    db.from("view_snapshots").select("creator_id, platform, snapshot_date, cumulative_views").order("snapshot_date", { ascending: false }),
-    db.from("post_snapshots").select("creator_id"),
+    ids === null ? creatorsQ : creatorsQ.in("id", ids),
+    scopeToCreators(db.from("monthly_metrics").select("*").order("year", { ascending: false }).order("month", { ascending: false }), ids),
+    scopeToCreators(db.from("payout_cycles").select("creator_id, payout_amount, views_earned, status"), ids),
+    scopeToCreators(db.from("creator_cycles").select("creator_id, baseline_views"), ids),
+    scopeToCreators(db.from("view_snapshots").select("creator_id, platform, snapshot_date, cumulative_views").order("snapshot_date", { ascending: false }), ids),
+    scopeToCreators(db.from("post_snapshots").select("creator_id"), ids),
   ]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -77,27 +88,47 @@ export async function GET() {
     };
   });
   return NextResponse.json(result);
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }
 
 export async function POST(req: Request) {
-  const db = createServerClient();
-  const body = await req.json();
+  try {
+    const ctx = await requireAuth(req);
+    const db = createServerClient();
+    const body = await req.json();
 
-  const { data, error } = await db
-    .from("creators")
-    .insert({
-      name: body.name,
-      instagram_username: body.instagram_username || null,
-      tiktok_username: body.tiktok_username || null,
-      base_fee: body.base_fee || 0,
-      rate_per_thousand_views: body.rate_per_thousand_views || 2.0,
-      affiliate_percentage: body.affiliate_percentage || 0,
-      monthly_target: body.monthly_target || 30,
-      joined_at: body.joined_at || new Date().toISOString().split("T")[0],
-    })
-    .select()
-    .single();
+    // New creators are stamped with the active campaign. A super_admin must pick
+    // a specific campaign first (can't create into "all campaigns").
+    if (!ctx.campaignId) {
+      return NextResponse.json(
+        { error: "Select a campaign before adding a creator." },
+        { status: 400 }
+      );
+    }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data, { status: 201 });
+    const { data, error } = await db
+      .from("creators")
+      .insert({
+        name: body.name,
+        instagram_username: body.instagram_username || null,
+        tiktok_username: body.tiktok_username || null,
+        base_fee: body.base_fee || 0,
+        rate_per_thousand_views: body.rate_per_thousand_views || 2.0,
+        affiliate_percentage: body.affiliate_percentage || 0,
+        monthly_target: body.monthly_target || 30,
+        joined_at: body.joined_at || new Date().toISOString().split("T")[0],
+        campaign_id: ctx.campaignId,
+      })
+      .select()
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(data, { status: 201 });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

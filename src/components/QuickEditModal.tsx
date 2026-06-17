@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -29,7 +30,7 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
     setLoading(true);
     setError("");
 
-    const res = await fetch(`/api/creators/${creator.id}`, {
+    const res = await apiFetch(`/api/creators/${creator.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

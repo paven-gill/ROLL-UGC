@@ -1,8 +1,29 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { cleanupTikTokThumbs } from "@/lib/thumbnail-storage";
+import { businessDayOfMonth } from "@/lib/date";
 
 export const maxDuration = 300;
+
+// ─── TikTok scrape cadence ────────────────────────────────────────────────────
+// Instagram syncs every night (it's RapidAPI, cheap per request). TikTok is
+// pay-per-result on Apify and is NOT our main driver, so we only scrape it every
+// few days to keep the bill down. The cron still fires nightly; we just skip
+// Phase 1 except on TikTok days.
+//
+// "Every Nth day" is anchored to the day-of-month so it's deterministic and
+// resets each month: with N=3 it runs on the 1st, 4th, 7th, 10th … 28th, 31st —
+// ~11 runs/month. No stored state needed; any night's decision depends only on
+// today's date. Override TIKTOK_SYNC_EVERY_DAYS to retune.
+//
+// Tradeoff: between runs the latest TikTok snapshot can be up to N days old, so a
+// payout cycle ending mid-gap reads slightly stale TikTok views. Accepted because
+// TikTok is a minor driver; the day-1 run keeps each month anchored at the start.
+const TIKTOK_SYNC_EVERY_DAYS = Number(process.env.TIKTOK_SYNC_EVERY_DAYS) || 3;
+
+function isTikTokSyncDay(): boolean {
+  return businessDayOfMonth() % TIKTOK_SYNC_EVERY_DAYS === 1;
+}
 
 // ─── GET /api/sync (daily cron at 11:55pm UTC) ────────────────────────────────
 //
@@ -91,21 +112,28 @@ export async function GET(req: Request) {
   const list = creators ?? [];
 
   // ── Phase 1: batched TikTok for all creators in one Apify run ──────────────
-  // Awaited so every TikTok snapshot is committed before the Instagram children
-  // run their cycle checks. A failure here is non-fatal — we log it and still
-  // run Instagram; the manual "Sync now" button is the per-creator fallback.
-  let tiktok: Record<string, unknown> = { status: "skipped" };
-  try {
-    const res = await fetch(`${baseUrl}/api/sync/tiktok`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
-    });
-    tiktok = res.ok
-      ? { status: "ok", ...(await res.json()) }
-      : { status: "error", error: `HTTP ${res.status} ${res.statusText}` };
-  } catch (e) {
-    console.error("[sync] batched TikTok failed:", e);
-    tiktok = { status: "error", error: String(e) };
+  // Only on TikTok days (every TIKTOK_SYNC_EVERY_DAYS) — Instagram still runs
+  // nightly below regardless. Awaited so every TikTok snapshot is committed
+  // before the Instagram children run their cycle checks. A failure here is
+  // non-fatal — we log it and still run Instagram; the manual "Sync now" button
+  // is the per-creator fallback.
+  let tiktok: Record<string, unknown>;
+  if (!isTikTokSyncDay()) {
+    tiktok = { status: "skipped", reason: `not a TikTok day (every ${TIKTOK_SYNC_EVERY_DAYS}d)` };
+    console.log(`[sync] TikTok skipped — not a TikTok day (every ${TIKTOK_SYNC_EVERY_DAYS}d)`);
+  } else {
+    try {
+      const res = await fetch(`${baseUrl}/api/sync/tiktok`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+      });
+      tiktok = res.ok
+        ? { status: "ok", ...(await res.json()) }
+        : { status: "error", error: `HTTP ${res.status} ${res.statusText}` };
+    } catch (e) {
+      console.error("[sync] batched TikTok failed:", e);
+      tiktok = { status: "error", error: String(e) };
+    }
   }
 
   // ── Phase 2: fan out Instagram (+ cycle check) per creator ─────────────────

@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 
 import { useState } from "react";
 import { X, Building2, CheckCircle2, AlertCircle } from "lucide-react";
@@ -61,7 +62,7 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
   async function handlePay() {
     setPaying(true);
     try {
-      const res = await fetch("/api/payout-cycles/pay", {
+      const res = await apiFetch("/api/payout-cycles/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

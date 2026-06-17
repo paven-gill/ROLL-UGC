@@ -18,6 +18,8 @@ import AddCreatorModal from "@/components/AddCreatorModal";
 import QuickEditModal from "@/components/QuickEditModal";
 import PayCycleModal, { type CycleForPay } from "@/components/PayCycleModal";
 import type { Creator, MonthlyMetrics } from "@/types";
+import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 type Tab = "home" | "creators" | "payouts" | "finance";
 type TimeRangeType = "7d" | "14d" | "30d" | "month" | "all";
@@ -142,6 +144,13 @@ const NAV: NavItem[] = [
 ];
 
 function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
+  const router = useRouter();
+  const { isSuperAdmin, activeCampaignId, logout, email } = useAuth();
+  // Finance lives inside a specific campaign (each brand has its own Wise
+  // account): visible to the Owner when they've selected a campaign, and always
+  // to a Manager (who is locked to their one campaign). Hidden in "All campaigns".
+  const financeAllowed = activeCampaignId !== null;
+
   return (
     <aside className="w-56 bg-[#07070e]/90 backdrop-blur-3xl border-r border-white/[0.1] flex flex-col shrink-0 sticky top-0 h-screen">
       <div className="px-5 py-5 border-b border-white/[0.06]">
@@ -152,8 +161,9 @@ function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void
           <span className="font-semibold text-sm text-white">UGC Dashboard</span>
         </div>
       </div>
+
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {NAV.map(({ id, label, Icon }) => (
+        {NAV.filter(({ id }) => id !== "finance" || financeAllowed).map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => onChange(id)}
@@ -167,9 +177,23 @@ function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void
             {label}
           </button>
         ))}
+        <button
+          onClick={() => router.push("/admin")}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left border border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.04]"
+        >
+          <Building2 size={15} />
+          Manage
+        </button>
       </nav>
-      <div className="px-5 py-4 border-t border-white/[0.06]">
-        <p className="text-gray-700 text-xs">FutureCreator.biz</p>
+
+      <div className="px-5 py-4 border-t border-white/[0.06] space-y-2">
+        {email && <p className="text-gray-600 text-xs truncate">{email}</p>}
+        <button
+          onClick={logout}
+          className="text-gray-500 hover:text-gray-200 text-xs"
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   );
@@ -437,6 +461,7 @@ function PostGrid({ posts, tiktokUsername }: { posts: PostRow[]; tiktokUsername?
 // ─── Home tab ─────────────────────────────────────────────────────────────────
 
 function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate: (id: string) => void }) {
+  const { activeCampaignId } = useAuth();
   const now = new Date();
   const [rangeType, setRangeType] = useState<TimeRangeType>("30d");
   const [selYear,  setSelYear]  = useState(now.getFullYear());
@@ -461,7 +486,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
     setChartLoading(true);
     const cParam = selectedCreatorId ? `&creator_id=${selectedCreatorId}` : "";
     if (rangeType === "all") {
-      fetch(`/api/dashboard/chart?months=12${cParam}`)
+      apiFetch(`/api/dashboard/chart?months=12${cParam}`)
         .then(r => r.json())
         .then(data => { setChartData(Array.isArray(data) ? data : []); setChartLoading(false); })
         .catch(() => { setChartData([]); setChartLoading(false); });
@@ -483,9 +508,13 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
       from = `${selYear}-${String(selMonth).padStart(2, "0")}-01`;
       to = `${selYear}-${String(selMonth).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
     }
+    // "All campaigns" view: macro views only — skip per-creator cycle-end markers.
+    const eventsReq = activeCampaignId !== null
+      ? apiFetch(`/api/dashboard/payout-events?from=${from}&to=${to}${cParam}`).then(r => r.json())
+      : Promise.resolve([]);
     Promise.all([
-      fetch(chartUrl).then(r => r.json()),
-      fetch(`/api/dashboard/payout-events?from=${from}&to=${to}${cParam}`).then(r => r.json()),
+      apiFetch(chartUrl).then(r => r.json()),
+      eventsReq,
     ]).then(([chartRaw, eventsRaw]) => {
       const events: PayoutEvent[] = Array.isArray(eventsRaw) ? eventsRaw : [];
       const points: { name: string; Views: number }[] = Array.isArray(chartRaw) ? chartRaw : [];
@@ -500,7 +529,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
       setChartData(merged);
       setChartLoading(false);
     }).catch(() => { setChartData([]); setChartLoading(false); });
-  }, [rangeType, selYear, selMonth, selectedCreatorId]);
+  }, [rangeType, selYear, selMonth, selectedCreatorId, activeCampaignId]);
 
   // Stats: all-time from creators data; rolling windows from range API; month from cycles API
   useEffect(() => {
@@ -508,7 +537,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
     if (rangeType === "all") {
       setStatsLoading(true);
       const cParam = selectedCreatorId ? `&creator_id=${selectedCreatorId}` : "";
-      fetch(`/api/dashboard/range?days=1095${cParam}`)
+      apiFetch(`/api/dashboard/range?days=1095${cParam}`)
         .then(r => r.json())
         .then(res => {
           setSummaries(Array.isArray(res.results) ? res.results : []);
@@ -525,7 +554,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
     const rangeUrl = rangeType === "month"
       ? `/api/dashboard/range?year=${selYear}&month=${selMonth}`
       : `/api/dashboard/range?days=${rangeType === "7d" ? 7 : rangeType === "14d" ? 14 : 30}`;
-    fetch(rangeUrl)
+    apiFetch(rangeUrl)
       .then(r => r.json())
       .then(res => {
         setSummaries(Array.isArray(res.results) ? res.results : []);
@@ -543,7 +572,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
   useEffect(() => {
     setPostsLoading(true);
     if (selectedCreatorId) {
-      fetch(`/api/posts/${selectedCreatorId}`)
+      apiFetch(`/api/posts/${selectedCreatorId}`)
         .then(r => r.json())
         .then(data => {
           const sorted = (Array.isArray(data) ? data : [])
@@ -554,7 +583,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
     } else {
       Promise.all(
         creators.map(c =>
-          fetch(`/api/posts/${c.id}`)
+          apiFetch(`/api/posts/${c.id}`)
             .then(r => r.json())
             .then((data: PostRow[]) => ({
               id: c.id,
@@ -784,69 +813,71 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
         </ResponsiveContainer>}
       </div>
 
-      {/* Posts section */}
-      {postsLoading ? (
-        <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">Loading...</div>
-      ) : selectedCreatorId ? (
-        /* ── Single creator: top 8 grid ── */
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-200">
-              Top Posts
-              <span className="text-gray-600 font-normal ml-2">· {creators.find(c => c.id === selectedCreatorId)?.name}</span>
-            </h2>
-            <span className="text-xs text-gray-600">Top 8 · {periodLabel}</span>
-          </div>
-          {displayCreatorPosts.length === 0 ? (
-            <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
-              {creatorPosts.length === 0 ? "No posts synced yet" : `No posts in this period`}
+      {/* Posts section — only when viewing a specific campaign (hidden for "All campaigns") */}
+      {activeCampaignId !== null && (
+        postsLoading ? (
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">Loading...</div>
+        ) : selectedCreatorId ? (
+          /* ── Single creator: top 8 grid ── */
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-200">
+                Top Posts
+                <span className="text-gray-600 font-normal ml-2">· {creators.find(c => c.id === selectedCreatorId)?.name}</span>
+              </h2>
+              <span className="text-xs text-gray-600">Top 8 · {periodLabel}</span>
             </div>
-          ) : (
-            <PostGrid posts={displayCreatorPosts} tiktokUsername={creators.find(c => c.id === selectedCreatorId)?.tiktok_username} />
-          )}
-        </div>
-      ) : (
-        /* ── All creators: one section per creator ── */
-        <div className="space-y-6">
-          {[...filteredCreators].filter(c => c.status !== "finished")
-            .sort((a, b) => {
-              const aTop = (allCreatorPosts.get(a.id)?.[0]?.view_count_used ?? 0);
-              const bTop = (allCreatorPosts.get(b.id)?.[0]?.view_count_used ?? 0);
-              return bTop - aTop;
-            })
-            .map(creator => {
-              const allPosts = allCreatorPosts.get(creator.id) ?? [];
-              const posts = filterPostsByRangeAndPlatform(allPosts).slice(0, 4);
-              return (
-                <div key={creator.id}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <h2
-                      className="text-sm font-semibold text-gray-200 hover:text-white cursor-pointer hover:underline underline-offset-2 transition-colors"
-                      onClick={() => onNavigate(creator.id)}
-                    >{creator.name}</h2>
-                    {creator.instagram_username && (
-                      <span className="text-blue-400/60 text-xs flex items-center gap-1">
-                        <Instagram size={10}/> @{creator.instagram_username}
-                      </span>
-                    )}
-                    {creator.tiktok_username && (
-                      <span className="text-pink-400/60 text-xs flex items-center gap-1">
-                        <Music2 size={10}/> @{creator.tiktok_username}
-                      </span>
-                    )}
-                    <span className="text-xs text-gray-600 ml-auto">Top 4 · {periodLabel}</span>
-                  </div>
-                  {posts.length === 0 ? (
-                    <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
-                      {allPosts.length === 0 ? "No posts synced yet" : "No posts in this period"}
+            {displayCreatorPosts.length === 0 ? (
+              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
+                {creatorPosts.length === 0 ? "No posts synced yet" : `No posts in this period`}
+              </div>
+            ) : (
+              <PostGrid posts={displayCreatorPosts} tiktokUsername={creators.find(c => c.id === selectedCreatorId)?.tiktok_username} />
+            )}
+          </div>
+        ) : (
+          /* ── All creators: one section per creator ── */
+          <div className="space-y-6">
+            {[...filteredCreators].filter(c => c.status !== "finished")
+              .sort((a, b) => {
+                const aTop = (allCreatorPosts.get(a.id)?.[0]?.view_count_used ?? 0);
+                const bTop = (allCreatorPosts.get(b.id)?.[0]?.view_count_used ?? 0);
+                return bTop - aTop;
+              })
+              .map(creator => {
+                const allPosts = allCreatorPosts.get(creator.id) ?? [];
+                const posts = filterPostsByRangeAndPlatform(allPosts).slice(0, 4);
+                return (
+                  <div key={creator.id}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <h2
+                        className="text-sm font-semibold text-gray-200 hover:text-white cursor-pointer hover:underline underline-offset-2 transition-colors"
+                        onClick={() => onNavigate(creator.id)}
+                      >{creator.name}</h2>
+                      {creator.instagram_username && (
+                        <span className="text-blue-400/60 text-xs flex items-center gap-1">
+                          <Instagram size={10}/> @{creator.instagram_username}
+                        </span>
+                      )}
+                      {creator.tiktok_username && (
+                        <span className="text-pink-400/60 text-xs flex items-center gap-1">
+                          <Music2 size={10}/> @{creator.tiktok_username}
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-600 ml-auto">Top 4 · {periodLabel}</span>
                     </div>
-                  ) : (
-                    <PostGrid posts={posts} tiktokUsername={creator.tiktok_username} />
-                  )}
-                </div>
-              );
-            })}
-        </div>
+                    {posts.length === 0 ? (
+                      <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
+                        {allPosts.length === 0 ? "No posts synced yet" : "No posts in this period"}
+                      </div>
+                    ) : (
+                      <PostGrid posts={posts} tiktokUsername={creator.tiktok_username} />
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )
       )}
     </div>
   );
@@ -1104,7 +1135,7 @@ function PayoutsTab() {
 
   function loadCycles() {
     setFetching(true);
-    fetch(`/api/dashboard/cycles?year=${selYear}&month=${selMonth}`)
+    apiFetch(`/api/dashboard/cycles?year=${selYear}&month=${selMonth}`)
       .then(r => r.json())
       .then(data => { setCycles(Array.isArray(data) ? data : []); setFetching(false); });
   }
@@ -1318,7 +1349,7 @@ function FinanceTab() {
 
   function fetchBalance() {
     setLoading(true);
-    fetch("/api/wise/balance")
+    apiFetch("/api/wise/balance")
       .then(r => r.json())
       .then(d => {
         if (d.error === "not_configured") { setNotConfigured(true); setData(null); }
@@ -1332,8 +1363,8 @@ function FinanceTab() {
 
   useEffect(() => {
     fetchBalance();
-    fetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
-    fetch("/api/wise/transactions")
+    apiFetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
+    apiFetch("/api/wise/transactions")
       .then(r => r.json())
       .then(d => setTransactions(Array.isArray(d?.transactions) ? d.transactions : []))
       .catch(() => setTransactions([]));
@@ -1343,7 +1374,7 @@ function FinanceTab() {
     if (!token.trim()) return;
     setConnecting(true);
     setConnectError(null);
-    const res = await fetch("/api/wise/settings", {
+    const res = await apiFetch("/api/wise/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: token.trim() }),
@@ -1365,7 +1396,7 @@ function FinanceTab() {
 
   async function handleDisconnect() {
     setDisconnecting(true);
-    await fetch("/api/wise/settings", { method: "DELETE" });
+    await apiFetch("/api/wise/settings", { method: "DELETE" });
     setData(null);
     setNotConfigured(true);
     setDisconnecting(false);
@@ -1682,13 +1713,42 @@ function WiseStatusBadge({ status }: { status: string }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+function PickCampaignNotice({ what }: { what: string }) {
+  return (
+    <div className="flex-1 flex items-center justify-center p-6">
+      <div className="text-center max-w-sm">
+        <div className="w-11 h-11 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto mb-4">
+          <Building2 size={18} className="text-gray-500" />
+        </div>
+        <h2 className="text-sm font-semibold text-gray-200 mb-1.5">
+          Select a campaign
+        </h2>
+        <p className="text-xs text-gray-500 leading-relaxed">
+          Choose a campaign from the dropdown in the top-right to manage its {what}.
+          The “All campaigns” view is a portfolio overview only.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function DashboardInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { isSuperAdmin, campaigns, activeCampaignId, setActiveCampaign } = useAuth();
+  const currentCampaignName =
+    campaigns.find((c) => c.id === activeCampaignId)?.name ?? null;
+  // "All campaigns" (Owner, no campaign picked) is the portfolio view: only the
+  // macro graph + Manage. Creators/Payouts/Finance all require a specific campaign
+  // (each brand has its own creators, payouts, Wise account). A Manager is always
+  // locked to one campaign, so they always have these.
+  const isAllCampaigns = activeCampaignId === null;
+  const financeAllowed = !isAllCampaigns;
   const now = new Date();
 
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const t = searchParams.get("tab");
+    if (t === "finance" && !financeAllowed) return "home";
     return (t === "creators" || t === "payouts" || t === "finance") ? t : "home";
   });
 
@@ -1704,7 +1764,7 @@ function DashboardInner() {
   const fetchCreators = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/creators");
+      const res = await apiFetch("/api/creators");
       const data = await res.json();
       setCreators(Array.isArray(data) ? data : []);
     } finally {
@@ -1716,7 +1776,7 @@ function DashboardInner() {
 
   async function syncCreator(id: string) {
     setSyncing(id);
-    await fetch(`/api/sync/${id}`, { method: "POST" });
+    await apiFetch(`/api/sync/${id}`, { method: "POST" });
     await fetchCreators();
     setSyncing(null);
   }
@@ -1732,6 +1792,28 @@ function DashboardInner() {
             <h1 className="text-sm font-semibold text-white capitalize">{activeTab}</h1>
             <p className="text-gray-700 text-xs">{creators.filter(c => c.status === "active").length} active creators</p>
           </div>
+
+          {/* Campaign scope */}
+          {isSuperAdmin ? (
+            <select
+              value={activeCampaignId ?? "all"}
+              onChange={(e) =>
+                setActiveCampaign(e.target.value === "all" ? null : e.target.value)
+              }
+              className="bg-white/[0.05] border border-white/[0.1] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 min-w-[150px]"
+            >
+              <option value="all">All campaigns</option>
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="bg-white/[0.03] border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-gray-300">
+              {currentCampaignName ?? "—"}
+            </span>
+          )}
         </div>
 
         {/* Content */}
@@ -1741,17 +1823,21 @@ function DashboardInner() {
           <>
             {activeTab === "home" && <HomeTab creators={creators} onNavigate={(id) => router.push(`/creators/${id}`)} />}
             {activeTab === "creators" && (
-              <CreatorsTab
-                creators={creators}
-                syncing={syncing}
-                onSync={syncCreator}
-                onAdd={() => setShowAdd(true)}
-                onNavigate={(id) => router.push(`/creators/${id}`)}
-                onRefresh={fetchCreators}
-              />
+              isAllCampaigns
+                ? <PickCampaignNotice what="creators" />
+                : <CreatorsTab
+                    creators={creators}
+                    syncing={syncing}
+                    onSync={syncCreator}
+                    onAdd={() => setShowAdd(true)}
+                    onNavigate={(id) => router.push(`/creators/${id}`)}
+                    onRefresh={fetchCreators}
+                  />
             )}
-            {activeTab === "payouts" && <PayoutsTab />}
-            {activeTab === "finance" && <FinanceTab />}
+            {activeTab === "payouts" && (
+              isAllCampaigns ? <PickCampaignNotice what="payouts" /> : <PayoutsTab />
+            )}
+            {activeTab === "finance" && financeAllowed && <FinanceTab />}
           </>
         )}
       </div>
@@ -1764,9 +1850,12 @@ function DashboardInner() {
 }
 
 export default function DashboardPage() {
+  // Remount the whole dashboard when the active campaign changes so every tab
+  // re-fetches with the new x-campaign-id scope.
+  const { activeCampaignId } = useAuth();
   return (
     <Suspense>
-      <DashboardInner />
+      <DashboardInner key={activeCampaignId ?? "all"} />
     </Suspense>
   );
 }

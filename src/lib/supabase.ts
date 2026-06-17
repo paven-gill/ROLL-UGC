@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
 // Lazy browser client — deferred so Next.js build-time module evaluation
 // doesn't throw when env vars aren't available during static analysis.
@@ -27,4 +28,17 @@ export function createServerClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { global: { fetch: (url, opts) => fetch(url, { ...opts, cache: "no-store" }) } }
   );
+}
+
+// Cookie-aware browser client (anon key) for auth: sign-in/out + reading the
+// session in client components. Lazy + memoized so we reuse one instance.
+let _browserAuthClient: ReturnType<typeof createBrowserClient> | undefined;
+export function createBrowserAuthClient() {
+  if (!_browserAuthClient) {
+    _browserAuthClient = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _browserAuthClient;
 }

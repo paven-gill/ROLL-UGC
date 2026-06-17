@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, allowedCreatorIds, isAuthError } from "@/lib/auth";
 
 // GET /api/dashboard/cycles?year=2026&month=5
 //
@@ -9,6 +10,8 @@ import { createServerClient } from "@/lib/supabase";
 // Payout rule: if a cycle ends in month M, it is counted in month M's payouts.
 
 export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const { searchParams } = new URL(req.url);
   const year = parseInt(searchParams.get("year") ?? "0", 10);
   const month = parseInt(searchParams.get("month") ?? "0", 10);
@@ -23,38 +26,45 @@ export async function GET(req: Request) {
   const nextFirstDay = `${ny}-${String(nm).padStart(2, "0")}-01`;
 
   const db = createServerClient();
+  const ids = await allowedCreatorIds(db, ctx);
+
+  // Completed cycles ending in this month (pending = to pay, paid = already paid)
+  const completedQ = db.from("payout_cycles")
+    .select("*, creators(name, instagram_username, tiktok_username)")
+    .gte("cycle_end_date", firstDay)
+    .lt("cycle_end_date", nextFirstDay)
+    .order("cycle_end_date");
+  // Active cycles ending in this month (for in-progress estimates)
+  const activeQ = db.from("creator_cycles")
+    .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status)")
+    .gte("cycle_end_date", firstDay)
+    .lt("cycle_end_date", nextFirstDay);
+  // Latest daily snapshot per creator+platform for current-views calculation
+  const snapsQ = db.from("view_snapshots")
+    .select("creator_id, platform, cumulative_views, snapshot_date")
+    .order("snapshot_date", { ascending: false });
+  // Campaign scope: constrain each creator-keyed query unless super_admin viewing all.
+  if (ids !== null) {
+    completedQ.in("creator_id", ids);
+    activeQ.in("creator_id", ids);
+    snapsQ.in("creator_id", ids);
+  }
 
   const [
     { data: completed },
     { data: activeCycles },
     { data: latestSnaps },
-  ] = await Promise.all([
-    // Completed cycles ending in this month (pending = to pay, paid = already paid)
-    db.from("payout_cycles")
-      .select("*, creators(name, instagram_username, tiktok_username)")
-      .gte("cycle_end_date", firstDay)
-      .lt("cycle_end_date", nextFirstDay)
-      .order("cycle_end_date"),
-    // Active cycles ending in this month (for in-progress estimates)
-    db.from("creator_cycles")
-      .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status)")
-      .gte("cycle_end_date", firstDay)
-      .lt("cycle_end_date", nextFirstDay),
-    // Latest daily snapshot per creator+platform for current-views calculation
-    db.from("view_snapshots")
-      .select("creator_id, platform, cumulative_views, snapshot_date")
-      .order("snapshot_date", { ascending: false }),
-  ]);
+  ] = await Promise.all([completedQ, activeQ, snapsQ]);
 
   // Helper: sum latest cumulative_views across all platforms for a creator
-  function latestTotalViews(creatorId: string): number {
+  const latestTotalViews = (creatorId: string): number => {
     const snaps = (latestSnaps ?? []).filter(s => s.creator_id === creatorId);
     const byPlatform = new Map<string, number>();
     for (const s of snaps) {
       if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
     }
     return Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
-  }
+  };
 
   // A stamped payout for this month is the authoritative figure for that creator —
   // don't also show their (new) running cycle as an in-progress estimate for the same month.
@@ -123,4 +133,8 @@ export async function GET(req: Request) {
     a.cycle_start_date.localeCompare(b.cycle_start_date)
   );
   return NextResponse.json(all);
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

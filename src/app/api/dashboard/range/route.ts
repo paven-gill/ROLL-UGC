@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { businessDate } from "@/lib/date";
+import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
 
 // GET /api/dashboard/range?days=30
 // OR  /api/dashboard/range?year=2026&month=5
@@ -19,6 +20,8 @@ function isoDate(y: number, mZeroBased: number, d: number): string {
 }
 
 export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const { searchParams } = new URL(req.url);
   const yearParam = searchParams.get("year");
   const monthParam = searchParams.get("month");
@@ -48,6 +51,11 @@ export async function GET(req: Request) {
   }
 
   const db = createServerClient();
+  const ids = await allowedCreatorIds(db, ctx);
+
+  const creatorsQ = db.from("creators")
+    .select("id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views")
+    .order("name");
 
   // Base retainers are attributed to the date a cycle COMPLETES (cycle_end_date),
   // matching the view-bonus accrual clock and the chart's "Cycle complete" dots.
@@ -56,18 +64,16 @@ export async function GET(req: Request) {
   // cumulative-views delta (baseline exclusive, end inclusive).
   const [{ data: creators }, { data: snapshots }, { data: completedCycles }, { data: activeCycles }] =
     await Promise.all([
-      db.from("creators")
-        .select("id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views")
-        .order("name"),
-      db.from("view_snapshots")
+      ids === null ? creatorsQ : creatorsQ.in("id", ids),
+      scopeToCreators(db.from("view_snapshots")
         .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
-        .order("snapshot_date", { ascending: true }),
-      db.from("payout_cycles")
+        .order("snapshot_date", { ascending: true }), ids),
+      scopeToCreators(db.from("payout_cycles")
         .select("creator_id, cycle_start_date, cycle_end_date, base_fee, status")
         .gt("cycle_end_date", baselineDate)
         .lte("cycle_end_date", endDate)
-        .in("status", ["pending", "paid"]),
-      db.from("creator_cycles").select("creator_id, cycle_start_date"),
+        .in("status", ["pending", "paid"]), ids),
+      scopeToCreators(db.from("creator_cycles").select("creator_id, cycle_start_date"), ids),
     ]);
 
   if (!creators) return NextResponse.json({ results: [], windowAccurate: false });
@@ -102,13 +108,13 @@ export async function GET(req: Request) {
   }
 
   // Most recent snapshot at/before targetDate (lists are date-ascending).
-  function atOrBefore(combo: string, targetDate: string): Snap | undefined {
+  const atOrBefore = (combo: string, targetDate: string): Snap | undefined => {
     const arr = byCombo.get(combo);
     if (!arr) return undefined;
     let r: Snap | undefined;
     for (const s of arr) { if (s.date <= targetDate) r = s; else break; }
     return r;
-  }
+  };
 
   // windowAccurate = true only if every tracked creator+platform had a snapshot
   // at/before the baseline date (otherwise we fall back to the earliest snapshot,
@@ -164,4 +170,8 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json({ results, windowAccurate });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

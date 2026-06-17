@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 
 // GET /api/creators/[id]/cycles
 // Returns active cycle state + completed cycle history for a creator.
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
+  try {
+  const ctx = await requireAuth(req);
   const db = createServerClient();
+  await assertCreatorInScope(db, ctx, params.id);
   const creatorId = params.id;
 
   const [
@@ -114,6 +118,10 @@ export async function GET(
     : completedRows;
 
   return NextResponse.json({ activeCycle, cycleHistory, lastSyncedAt });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }
 
 // PATCH /api/creators/[id]/cycles
@@ -124,7 +132,10 @@ export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
+  try {
+  const ctx = await requireAuth(req);
   const db = createServerClient();
+  await assertCreatorInScope(db, ctx, params.id);
   const creatorId = params.id;
   const { cycle_start_date, cycle_end_date: customEndDate } = await req.json() as { cycle_start_date: string; cycle_end_date?: string };
 
@@ -163,4 +174,8 @@ export async function PATCH(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ ok: true, cycle_start_date, cycle_end_date: endDate, baseline_views });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

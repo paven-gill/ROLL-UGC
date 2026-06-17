@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -10,6 +11,8 @@ const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov
 // The current month also includes in-progress cycle estimates.
 
 export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const { searchParams } = new URL(req.url);
   const monthCount = Math.min(12, Math.max(1, parseInt(searchParams.get("months") ?? "6", 10)));
   const creatorId = searchParams.get("creator_id") ?? null;
@@ -32,21 +35,25 @@ export async function GET(req: Request) {
   const latestNextFirstDay = periods[periods.length - 1].nextFirstDay;
 
   const db = createServerClient();
+  const ids = await allowedCreatorIds(db, ctx);
 
   let completedQ = db.from("payout_cycles")
     .select("creator_id, cycle_end_date, views_earned, payout_amount")
     .gte("cycle_end_date", oldestFirstDay)
     .lt("cycle_end_date", latestNextFirstDay);
   if (creatorId) completedQ = completedQ.eq("creator_id", creatorId);
+  completedQ = scopeToCreators(completedQ, ids);
 
   let activeQ = db.from("creator_cycles")
     .select("creator_id, cycle_end_date, baseline_views");
   if (creatorId) activeQ = activeQ.eq("creator_id", creatorId);
+  activeQ = scopeToCreators(activeQ, ids);
 
   let snapsQ = db.from("view_snapshots")
     .select("creator_id, platform, cumulative_views, snapshot_date")
     .order("snapshot_date", { ascending: false });
   if (creatorId) snapsQ = snapsQ.eq("creator_id", creatorId);
+  snapsQ = scopeToCreators(snapsQ, ids);
 
   const [{ data: completed }, { data: activeCycles }, { data: latestSnaps }] = await Promise.all([
     completedQ,
@@ -55,14 +62,14 @@ export async function GET(req: Request) {
   ]);
 
   // Helper: latest total views across all platforms for a creator
-  function latestTotalViews(cid: string): number {
+  const latestTotalViews = (cid: string): number => {
     const snaps = (latestSnaps ?? []).filter(s => s.creator_id === cid);
     const byPlatform = new Map<string, number>();
     for (const s of snaps) {
       if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
     }
     return Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
-  }
+  };
 
   const currentMonthFirstDay = periods[periods.length - 1].firstDay;
   const currentMonthNextFirstDay = periods[periods.length - 1].nextFirstDay;
@@ -98,4 +105,8 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json(chartData);
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

@@ -8,6 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Creator, MonthlyMetrics } from "@/types";
+import { apiFetch } from "@/lib/api";
 
 interface CreatorDetail extends Creator {
   metrics: MonthlyMetrics[];
@@ -227,9 +228,9 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
   const fetchCreator = useCallback(async () => {
     const [res, postsRes, cyclesRes] = await Promise.all([
-      fetch(`/api/creators/${params.id}`),
-      fetch(`/api/posts/${params.id}`),
-      fetch(`/api/creators/${params.id}/cycles`),
+      apiFetch(`/api/creators/${params.id}`),
+      apiFetch(`/api/posts/${params.id}`),
+      apiFetch(`/api/creators/${params.id}/cycles`),
     ]);
     const data: CreatorDetail = await res.json();
     const postsData: PostRow[] = await postsRes.json();
@@ -259,7 +260,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
   async function patch(body: Record<string, unknown>) {
     setSaving(true);
-    await fetch(`/api/creators/${params.id}`, {
+    await apiFetch(`/api/creators/${params.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -301,7 +302,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
 
   async function deleteCreator() {
     if (!confirm(`Remove ${creator?.name}? This cannot be undone.`)) return;
-    await fetch(`/api/creators/${params.id}`, { method: "DELETE" });
+    await apiFetch(`/api/creators/${params.id}`, { method: "DELETE" });
     router.push("/");
   }
 
@@ -310,7 +311,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     setSavingCycle(true);
     const body: Record<string, string> = { cycle_start_date: cycleStartInput };
     if (cycleEndInput) body.cycle_end_date = cycleEndInput;
-    await fetch(`/api/creators/${params.id}/cycles`, {
+    await apiFetch(`/api/creators/${params.id}/cycles`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -324,13 +325,13 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     if (!historyCycleStartInput || !historyCycleEndInput) return;
     setSavingHistoryCycle(true);
     if (id === "active") {
-      await fetch(`/api/creators/${params.id}/cycles`, {
+      await apiFetch(`/api/creators/${params.id}/cycles`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cycle_start_date: historyCycleStartInput, cycle_end_date: historyCycleEndInput }),
       });
     } else {
-      await fetch(`/api/payout-cycles/${id}`, {
+      await apiFetch(`/api/payout-cycles/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cycle_start_date: historyCycleStartInput, cycle_end_date: historyCycleEndInput }),
@@ -345,7 +346,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     if (!confirm("Remove this post from tracking? It won't re-appear on future syncs.")) return;
     const key = `${post.post_id}__${post.platform}`;
     setDeletingPostId(key);
-    await fetch("/api/posts/exclude", {
+    await apiFetch("/api/posts/exclude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ post_id: post.post_id, creator_id: params.id, platform: post.platform }),
@@ -363,7 +364,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     setBulkDeleting(true);
     const toDelete = posts.filter(p => selectedPosts.has(`${p.post_id}__${p.platform}`));
     await Promise.all(toDelete.map(post =>
-      fetch("/api/posts/exclude", {
+      apiFetch("/api/posts/exclude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ post_id: post.post_id, creator_id: params.id, platform: post.platform }),
@@ -380,7 +381,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const res = await fetch(`/api/sync/${params.id}`, { method: "POST" });
+      const res = await apiFetch(`/api/sync/${params.id}`, { method: "POST" });
       const data = await res.json();
       await fetchCreator();
       if (data.instagram_error && data.tiktok_error) {

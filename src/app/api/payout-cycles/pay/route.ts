@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { WISE_BASE, getWiseToken, fetchWiseProfiles, pickWiseProfile, wiseSignedFetch } from "@/lib/wise";
+import { WISE_BASE, getWiseConfig, fetchWiseProfiles, pickWiseProfile, wiseSignedFetch } from "@/lib/wise";
+import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 
 async function attemptWiseTransfer(
+  campaignId: string,
   amount: number,
   recipientEmail: string,
   creatorName: string,
   reference: string,
 ): Promise<{ transfer_id: string | null; error: string | null }> {
-  const token = await getWiseToken();
-  if (!token) return { transfer_id: null, error: "Wise not configured" };
+  const { token, profileId } = await getWiseConfig(campaignId);
+  if (!token) return { transfer_id: null, error: "Wise not configured for this campaign" };
 
   try {
     let profiles: any[];
@@ -18,7 +20,7 @@ async function attemptWiseTransfer(
     } catch {
       return { transfer_id: null, error: "Wise auth failed" };
     }
-    const profile = pickWiseProfile(profiles);
+    const profile = pickWiseProfile(profiles, profileId);
     if (!profile) return { transfer_id: null, error: "No Wise business profile found" };
 
     // Create recipient
@@ -100,6 +102,11 @@ async function attemptWiseTransfer(
 // type: "pending"     — existing payout_cycles row, just update + pay
 // type: "in_progress" — cycle still in creator_cycles; close it, create record, new cycle, pay
 export async function POST(req: NextRequest) {
+  try {
+  const ctx = await requireAuth(req);
+  if (!ctx.campaignId) {
+    return NextResponse.json({ error: "Select a campaign before paying." }, { status: 400 });
+  }
   const body = await req.json();
   const {
     type,
@@ -119,6 +126,9 @@ export async function POST(req: NextRequest) {
   } = body;
 
   const db = createServerClient();
+  // Ensure the creator being paid actually belongs to the active campaign — so a
+  // payout can never be funded from the wrong brand's Wise account.
+  if (creator_id) await assertCreatorInScope(db, ctx, creator_id);
   const total = parseFloat((base_fee + view_bonus + (bonus_amount ?? 0)).toFixed(2));
   let finalCycleId = cycle_id;
 
@@ -209,6 +219,7 @@ export async function POST(req: NextRequest) {
 
   if (recipient_wise_email?.trim()) {
     wiseResult = await attemptWiseTransfer(
+      ctx.campaignId,
       total,
       recipient_wise_email.trim(),
       creator_name ?? "Creator",
@@ -232,4 +243,8 @@ export async function POST(req: NextRequest) {
     wise_transfer_id: wiseResult.transfer_id,
     wise_error: wiseResult.error,
   });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

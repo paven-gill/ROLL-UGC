@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { businessDate } from "@/lib/date";
+import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
 
 // GET /api/dashboard/chart-range?days=14[&creator_id=uuid]
 // OR  /api/dashboard/chart-range?year=2026&month=4[&creator_id=uuid]
@@ -21,6 +22,8 @@ function dateLabel(dateStr: string): string {
 }
 
 export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
   const { searchParams } = new URL(req.url);
   const creatorId = searchParams.get("creator_id") ?? null;
 
@@ -57,6 +60,7 @@ export async function GET(req: Request) {
   const lastDate = dates[dates.length - 1];
 
   const db = createServerClient();
+  const ids = await allowedCreatorIds(db, ctx);
 
   // Fetch all snapshots up to lastDate (no lower bound) so gaps between syncs
   // don't zero-out days — we fall back to the nearest prior snapshot as baseline.
@@ -66,6 +70,7 @@ export async function GET(req: Request) {
     .lte("snapshot_date", lastDate)
     .order("snapshot_date", { ascending: true });
   if (creatorId) q = q.eq("creator_id", creatorId);
+  q = scopeToCreators(q, ids);
 
   const { data: snapshots } = await q;
 
@@ -84,7 +89,7 @@ export async function GET(req: Request) {
   const comboList = Array.from(snapsByCombo.keys());
 
   // Returns the most recent cumulative_views at or before targetDate, or undefined
-  function latestAtOrBefore(combo: string, targetDate: string): number | undefined {
+  const latestAtOrBefore = (combo: string, targetDate: string): number | undefined => {
     const snaps = snapsByCombo.get(combo);
     if (!snaps) return undefined;
     let result: number | undefined;
@@ -93,7 +98,7 @@ export async function GET(req: Request) {
       else break;
     }
     return result;
-  }
+  };
 
   const chartData = dates.map(date => {
     const pd = prevDay(date);
@@ -110,4 +115,8 @@ export async function GET(req: Request) {
   return NextResponse.json(chartData, {
     headers: { "Cache-Control": "no-store" },
   });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

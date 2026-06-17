@@ -69,18 +69,26 @@ export type WiseProfile = {
   name: string;
 };
 
-// Token resolution: Supabase (app_settings) takes priority over the env var.
-export async function getWiseToken(): Promise<string | null> {
-  try {
-    const db = createServerClient();
-    const { data } = await db
-      .from("app_settings")
-      .select("value")
-      .eq("key", "wise_api_token")
-      .single();
-    if (data?.value) return data.value;
-  } catch {}
-  return process.env.WISE_API_TOKEN ?? null;
+// Per-campaign Wise config. Each brand has its own Wise account, so the token
+// and chosen profile live on the campaign row. Falls back to the env vars when a
+// campaign hasn't connected its own account yet (or for single-tenant dev).
+export async function getWiseConfig(
+  campaignId: string | null
+): Promise<{ token: string | null; profileId: string | null }> {
+  if (campaignId) {
+    try {
+      const db = createServerClient();
+      const { data } = await db
+        .from("campaigns")
+        .select("wise_api_token, wise_profile_id")
+        .eq("id", campaignId)
+        .single();
+      if (data?.wise_api_token) {
+        return { token: data.wise_api_token, profileId: data.wise_profile_id ?? null };
+      }
+    } catch {}
+  }
+  return { token: process.env.WISE_API_TOKEN ?? null, profileId: process.env.WISE_PROFILE_ID ?? null };
 }
 
 export function wiseProfileName(p: any): string {
@@ -104,13 +112,13 @@ export async function fetchWiseProfiles(token: string): Promise<any[]> {
   return res.json();
 }
 
-// Pick the profile to operate on. There are multiple business profiles under
-// this login, so we must target a specific one rather than "first business":
-//   1. WISE_PROFILE_ID env var (exact id) — preferred, explicit
+// Pick the profile to operate on. A token can expose multiple profiles, so we
+// target a specific one rather than "first business":
+//   1. the campaign's stored wise_profile_id (preferred), else WISE_PROFILE_ID env
 //   2. name match (defaults to "Content Creator Engine")
 //   3. first business profile, then first profile of any kind
-export function pickWiseProfile(profiles: any[]): any {
-  const wantId = process.env.WISE_PROFILE_ID?.trim();
+export function pickWiseProfile(profiles: any[], preferredId?: string | null): any {
+  const wantId = (preferredId ?? process.env.WISE_PROFILE_ID)?.toString().trim();
   if (wantId) {
     const byId = profiles.find((p) => String(p.id) === wantId);
     if (byId) return byId;

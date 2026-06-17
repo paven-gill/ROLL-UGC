@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { scrapeInstagram, scrapeTikTok } from "@/lib/apify";
 import { storeSnapshot, processCycle } from "@/lib/sync-core";
+import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 
 export const maxDuration = 300;
 
@@ -19,6 +20,20 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const db = createServerClient();
+
+  // Allow the cron (CRON_SECRET) OR a logged-in user who owns this creator's
+  // campaign (Owner inside the campaign, or the brand's Manager).
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    try {
+      const ctx = await requireAuth(req);
+      await assertCreatorInScope(db, ctx, params.id);
+    } catch (e) {
+      if (isAuthError(e)) return e.response;
+      throw e;
+    }
+  }
+
   const skipTiktok = new URL(req.url).searchParams.get("skipTiktok") === "1";
 
   const { data: creator, error } = await db

@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { WISE_BASE, getWiseToken, fetchWiseProfiles, pickWiseProfile, wiseProfileName } from "@/lib/wise";
+import { WISE_BASE, getWiseConfig, fetchWiseProfiles, pickWiseProfile, wiseProfileName } from "@/lib/wise";
+import { requireAuth, isAuthError } from "@/lib/auth";
 
-export async function GET() {
-  const token = await getWiseToken();
+export async function GET(req: Request) {
+  try {
+  const ctx = await requireAuth(req);
+  if (!ctx.campaignId) {
+    return NextResponse.json({ error: "select_campaign" }, { status: 400 });
+  }
+  const { token, profileId } = await getWiseConfig(ctx.campaignId);
   if (!token) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
@@ -21,9 +27,8 @@ export async function GET() {
     return NextResponse.json({ error: "no_profiles" }, { status: 404 });
   }
 
-  // Target the specific business profile (Content Creator Engine Pty Ltd),
-  // not "first business" — there are multiple business profiles on this login.
-  const profile = pickWiseProfile(profiles);
+  // Target this campaign's stored Wise profile (falls back to env/business pick).
+  const profile = pickWiseProfile(profiles, profileId);
   if (!profile) {
     return NextResponse.json({ error: "no_target_profile" }, { status: 404 });
   }
@@ -49,4 +54,8 @@ export async function GET() {
     profile: { id: profile.id, type: profile.type, name: wiseProfileName(profile) },
     balances,
   });
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }

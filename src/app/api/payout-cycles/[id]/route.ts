@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 
 // PATCH /api/payout-cycles/[id]
 // Body: { status?: "pending" | "paid", cycle_start_date?: string, cycle_end_date?: string }
@@ -13,6 +14,8 @@ export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
+  try {
+  const ctx = await requireAuth(req);
   const body = await req.json().catch(() => ({}));
   const { status, cycle_start_date, cycle_end_date } = body as {
     status?: string;
@@ -35,6 +38,9 @@ export async function PATCH(
   if (fetchError || !existing) {
     return NextResponse.json({ error: "cycle not found" }, { status: 404 });
   }
+
+  // Scope: the cycle's creator must belong to the caller's campaign.
+  await assertCreatorInScope(db, ctx, existing.creator_id);
 
   const today = new Date().toISOString().split("T")[0];
   const newEndDate = cycle_end_date ?? existing.cycle_end_date;
@@ -88,4 +94,8 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
+  } catch (e) {
+    if (isAuthError(e)) return e.response;
+    throw e;
+  }
 }
