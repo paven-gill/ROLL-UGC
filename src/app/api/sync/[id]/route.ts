@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { scrapeInstagram, scrapeTikTok } from "@/lib/apify";
+import { scrapeInstagram } from "@/lib/apify";
+import { scrapeTikTok } from "@/lib/tiktok";
 import { storeSnapshot, processCycle } from "@/lib/sync-core";
 import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 

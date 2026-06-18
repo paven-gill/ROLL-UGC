@@ -1,5 +1,6 @@
 import { createServerClient } from "./supabase";
 import type { PostSnapshot } from "./apify";
+import heicConvert from "heic-convert";
 
 const BUCKET = "thumbnails";
 const TOP_N = 8;
@@ -43,10 +44,22 @@ export async function uploadTopTikTokThumbs(
       });
       if (!res.ok) return;
 
-      const buffer = await res.arrayBuffer();
-      const contentType = res.headers.get("content-type") ?? "image/jpeg";
+      let body: Buffer | ArrayBuffer = await res.arrayBuffer();
+      let contentType = res.headers.get("content-type") ?? "image/jpeg";
 
-      const { error } = await db.storage.from(BUCKET).upload(path, buffer, {
+      // TikTok (via ScrapTik) serves .heic covers, which Chrome/Firefox can't
+      // render in <img>. Transcode to JPEG so stored thumbnails stay browser-safe.
+      // (Instagram covers are already jpeg and skip this.)
+      if (contentType.includes("heic") || post.thumbnail_url!.includes(".heic")) {
+        try {
+          body = await heicConvert({ buffer: Buffer.from(body), format: "JPEG", quality: 0.85 });
+          contentType = "image/jpeg";
+        } catch (e) {
+          console.error(`[thumbnails] heic→jpeg failed ${post.post_id}, storing original:`, e);
+        }
+      }
+
+      const { error } = await db.storage.from(BUCKET).upload(path, body, {
         contentType,
         upsert: true,
       });

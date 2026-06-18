@@ -22,6 +22,9 @@ export const maxDuration = 300;
 const TIKTOK_SYNC_EVERY_DAYS = Number(process.env.TIKTOK_SYNC_EVERY_DAYS) || 3;
 
 function isTikTokSyncDay(): boolean {
+  // N<=1 means run every night. (Guard: `x % 1` is always 0, so without this a
+  // value of 1 would never match `=== 1` and would silently disable TikTok.)
+  if (TIKTOK_SYNC_EVERY_DAYS <= 1) return true;
   return businessDayOfMonth() % TIKTOK_SYNC_EVERY_DAYS === 1;
 }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { scrapeTikTokBatch, type TikTokTarget, type ScrapedData } from "@/lib/apify";
+import { scrapeTikTokBatch, type TikTokTarget, type ScrapedData } from "@/lib/tiktok";
 import { storeSnapshot } from "@/lib/sync-core";
 
 export const maxDuration = 300;
