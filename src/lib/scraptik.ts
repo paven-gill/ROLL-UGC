@@ -35,12 +35,27 @@ const REQUEST_COUNT = 35;
 const EST_PAGE_SIZE = 10;
 const MAX_PAGES = Math.ceil(POSTS_LIMIT / EST_PAGE_SIZE) + 2;
 
-// Concurrency + spacing keep us comfortably under the Pro tier's 10 req/sec:
-// CONCURRENCY lanes each wait PAGE_DELAY_MS between calls → peak ≈ CONCURRENCY / delay.
-// 4 / 0.5s = 8 req/s. At ~600 calls (100 creators × 6 pages) the batch finishes in ~75s,
-// well within the route's 300s maxDuration.
-const CONCURRENCY = 4;
-const PAGE_DELAY_MS = 500;
+// How many creators are scraped concurrently. The global rate gate below is what
+// actually caps request throughput, so this just keeps the pipeline full.
+const CONCURRENCY = 6;
+
+// ── Global rate gate ──────────────────────────────────────────────────────────
+// ScrapTik Pro allows 10 req/sec; exceeding it returns 429. We schedule every
+// request into a future time-slot spaced MIN_INTERVAL_MS apart, shared across all
+// concurrent creators in this invocation, so collective throughput stays under the
+// limit no matter how many lanes are running. ~8.3 req/s leaves headroom.
+const MIN_INTERVAL_MS = 120;
+const MAX_RETRIES = 4;
+let nextSlot = 0;
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+async function rateGate(): Promise<void> {
+  const now = Date.now();
+  const slot = Math.max(now, nextSlot);
+  nextSlot = slot + MIN_INTERVAL_MS;
+  if (slot > now) await sleep(slot - now);
+}
 
 const normalizeHandle = (s: string) => s.trim().replace(/^@/, "").toLowerCase();
 
@@ -52,8 +67,17 @@ function rapidHeaders() {
   };
 }
 
-async function scraptikGet(path: string): Promise<Record<string, unknown>> {
+// Rate-gated GET with backoff on 429. A single rate-limit hit used to throw and
+// (in the batch) zero out the whole creator; now we wait and retry instead.
+async function scraptikGet(path: string, attempt = 0): Promise<Record<string, unknown>> {
+  await rateGate();
   const res = await fetch(`${SCRAPTIK_BASE}${path}`, { headers: rapidHeaders() });
+  if (res.status === 429 && attempt < MAX_RETRIES) {
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const backoff = retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt;
+    await sleep(backoff);
+    return scraptikGet(path, attempt + 1);
+  }
   if (!res.ok) throw new Error(`ScrapTik ${path} → ${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -158,9 +182,17 @@ async function fetchCreatorPosts(userId: string): Promise<Record<string, unknown
 
   while (page < MAX_PAGES && all.length < POSTS_LIMIT) {
     page++;
-    const resp = await scraptikGet(
-      `${EP_USER_POSTS}?user_id=${encodeURIComponent(userId)}&count=${REQUEST_COUNT}&max_cursor=${encodeURIComponent(cursor)}`
-    );
+    let resp: Record<string, unknown>;
+    try {
+      resp = await scraptikGet(
+        `${EP_USER_POSTS}?user_id=${encodeURIComponent(userId)}&count=${REQUEST_COUNT}&max_cursor=${encodeURIComponent(cursor)}`
+      );
+    } catch (e) {
+      // A page that still fails after retries shouldn't discard the posts we
+      // already have — keep the partial result rather than zeroing the creator.
+      console.error(`[scraptik] page ${page} failed for user ${userId}, keeping ${all.length} posts:`, e);
+      break;
+    }
     const items = readAwemeList(resp);
     if (items.length === 0) break;
 
@@ -175,8 +207,7 @@ async function fetchCreatorPosts(userId: string): Promise<Record<string, unknown
     const nextCursor = String(resp.max_cursor ?? resp.maxCursor ?? "");
     if (!hasMore || !nextCursor || nextCursor === cursor) break;
     cursor = nextCursor;
-
-    await new Promise(r => setTimeout(r, PAGE_DELAY_MS));
+    // No explicit delay here — the global rate gate in scraptikGet handles spacing.
   }
 
   return all.slice(0, POSTS_LIMIT);
