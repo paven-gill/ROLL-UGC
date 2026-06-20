@@ -6,9 +6,11 @@ import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
 // Body: { status?: "pending" | "paid", cycle_start_date?: string, cycle_end_date?: string }
 //
 // If editing dates (not a status change) and the new end date is still in the future,
-// the cycle is re-activated: creator_cycles is updated to these dates and any payout_cycles
-// that rolled over after this one are deleted. The row itself is kept so the sync can detect
-// it was manually restored and avoid re-rolling before the end date passes.
+// the cycle is re-activated: creator_cycles is updated to these dates and the stamped
+// payout_cycles row for this cycle (plus any that rolled over after it) is deleted —
+// the cycle is running again, so it has no completed-payout row. Re-rolling is prevented
+// by the future end date in creator_cycles, not by the payout row. Already-paid rows are
+// preserved. When the cycle's end date passes, the sync re-stamps a fresh payout.
 
 export async function PATCH(
   req: Request,
@@ -59,14 +61,16 @@ export async function PATCH(
       })
       .eq("creator_id", existing.creator_id);
 
-    // Delete any payout_cycles that were created after this cycle rolled over
+    // Remove this cycle's stamped payout row and any that rolled over after it — the
+    // cycle is running again, so it shouldn't appear as a completed payout. Without this,
+    // the Payouts tab keeps reading the stale row and the edit looks like it did nothing.
+    // Paid rows are kept so we never erase a real payment record.
     await db
       .from("payout_cycles")
       .delete()
       .eq("creator_id", existing.creator_id)
-      .gt("cycle_start_date", existing.cycle_start_date);
-
-    // Keep this payout row — sync checks for its existence to avoid re-rolling the cycle.
+      .gte("cycle_start_date", existing.cycle_start_date)
+      .neq("status", "paid");
 
     return NextResponse.json({
       ok: true,
