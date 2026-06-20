@@ -173,6 +173,19 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // Clear any stamped payout rows that overlap the (new) running cycle. A pending
+  // payout whose start is on/after the active cycle's start represents a cycle that
+  // was "completed" but is now running again — a contradictory leftover that the
+  // Payouts tab would keep showing instead of the live cycle. Earlier cycles
+  // (start before the active start) are real history and are preserved, as are
+  // already-paid rows.
+  await db
+    .from("payout_cycles")
+    .delete()
+    .eq("creator_id", creatorId)
+    .gte("cycle_start_date", cycle_start_date)
+    .neq("status", "paid");
+
   return NextResponse.json({ ok: true, cycle_start_date, cycle_end_date: endDate, baseline_views });
   } catch (e) {
     if (isAuthError(e)) return e.response;
