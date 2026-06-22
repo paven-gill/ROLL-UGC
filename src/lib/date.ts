@@ -28,3 +28,13 @@ export function businessDate(d: Date = new Date()): string {
 export function businessDayOfMonth(d: Date = new Date()): number {
   return Number(businessDate(d).slice(-2));
 }
+
+// Shift a YYYY-MM-DD string by `delta` calendar days (delta may be negative).
+// Pure date math (no timezone), so it composes with the YYYY-MM-DD snapshot
+// dates used for query bounds.
+export function addDays(dateStr: string, delta: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().split("T")[0];
+}

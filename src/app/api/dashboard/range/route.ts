@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { businessDate } from "@/lib/date";
+import { businessDate, addDays } from "@/lib/date";
+import { fetchAllRows } from "@/lib/fetch-all";
 import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
+
+// Days of snapshots to fetch BEFORE the window baseline, so the baseline lookup
+// can fall back to the nearest prior snapshot even across a skipped sync.
+const BASELINE_BUFFER_DAYS = 14;
 
 // GET /api/dashboard/range?days=30
 // OR  /api/dashboard/range?year=2026&month=5
@@ -62,12 +67,32 @@ export async function GET(req: Request) {
   // Count completed cycles (pending or paid) whose end date falls strictly after
   // the baseline and on/before the window end — same boundary semantics as the
   // cumulative-views delta (baseline exclusive, end inclusive).
-  const [{ data: creators }, { data: snapshots }, { data: completedCycles }, { data: activeCycles }] =
+  // Fetch only [baseline - buffer, endDate], paged past Supabase's 1000-row
+  // cap. The previous unbounded ascending query silently dropped the newest
+  // snapshots once the table passed 1000 rows, under-counting recent windows.
+  const snapFetchLower = addDays(baselineDate, -BASELINE_BUFFER_DAYS);
+  const snapshotsPromise = fetchAllRows<{
+    creator_id: string;
+    platform: string;
+    cumulative_views: number | null;
+    post_count_30d: number | null;
+    snapshot_date: string;
+  }>((from, to) =>
+    scopeToCreators(
+      db.from("view_snapshots")
+        .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
+        .gte("snapshot_date", snapFetchLower)
+        .lte("snapshot_date", endDate)
+        .order("snapshot_date", { ascending: true })
+        .range(from, to),
+      ids,
+    ),
+  );
+
+  const [{ data: creators }, snapshots, { data: completedCycles }, { data: activeCycles }] =
     await Promise.all([
       ids === null ? creatorsQ : creatorsQ.in("id", ids),
-      scopeToCreators(db.from("view_snapshots")
-        .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
-        .order("snapshot_date", { ascending: true }), ids),
+      snapshotsPromise,
       scopeToCreators(db.from("payout_cycles")
         .select("creator_id, cycle_start_date, cycle_end_date, base_fee, status")
         .gt("cycle_end_date", baselineDate)

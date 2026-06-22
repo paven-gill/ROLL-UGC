@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { businessDate } from "@/lib/date";
+import { businessDate, addDays } from "@/lib/date";
+import { fetchAllRows } from "@/lib/fetch-all";
 import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
+
+// Days of snapshots to fetch BEFORE the visible window, so the first day's
+// delta can find its prior-day baseline even if a sync was skipped. Daily syncs
+// make 1 day enough; 14 absorbs any realistic gap while keeping the fetch small.
+const BASELINE_BUFFER_DAYS = 14;
 
 // GET /api/dashboard/chart-range?days=14[&creator_id=uuid]
 // OR  /api/dashboard/chart-range?year=2026&month=4[&creator_id=uuid]
@@ -62,17 +68,28 @@ export async function GET(req: Request) {
   const db = createServerClient();
   const ids = await allowedCreatorIds(db, ctx);
 
-  // Fetch all snapshots up to lastDate (no lower bound) so gaps between syncs
-  // don't zero-out days — we fall back to the nearest prior snapshot as baseline.
-  let q = db
-    .from("view_snapshots")
-    .select("creator_id, platform, cumulative_views, snapshot_date")
-    .lte("snapshot_date", lastDate)
-    .order("snapshot_date", { ascending: true });
-  if (creatorId) q = q.eq("creator_id", creatorId);
-  q = scopeToCreators(q, ids);
-
-  const { data: snapshots } = await q;
+  // Fetch only the visible window (plus a small baseline buffer), and PAGE
+  // through it. A bare `.select()` is capped at 1000 rows by Supabase; with the
+  // ascending sort that silently drops the newest snapshots once the table
+  // passes 1000 rows, which made "today" render as zero. The lower bound keeps
+  // each request small so the dashboard stays fast as history accumulates.
+  const fetchLowerBound = addDays(dates[0], -BASELINE_BUFFER_DAYS);
+  const snapshots = await fetchAllRows<{
+    creator_id: string;
+    platform: string;
+    cumulative_views: number | null;
+    snapshot_date: string;
+  }>((from, to) => {
+    let q = db
+      .from("view_snapshots")
+      .select("creator_id, platform, cumulative_views, snapshot_date")
+      .gte("snapshot_date", fetchLowerBound)
+      .lte("snapshot_date", lastDate)
+      .order("snapshot_date", { ascending: true })
+      .range(from, to);
+    if (creatorId) q = q.eq("creator_id", creatorId);
+    return scopeToCreators(q, ids);
+  });
 
   // Exact lookup: "creator_id|platform|date" => cumulative_views
   const snapMap = new Map<string, number>();
