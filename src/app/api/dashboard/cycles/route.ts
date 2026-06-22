@@ -39,6 +39,11 @@ export async function GET(req: Request) {
     .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status)")
     .gte("cycle_end_date", firstDay)
     .lt("cycle_end_date", nextFirstDay);
+  // Every creator's current active-cycle start (any month) — used to drop superseded
+  // stamps below. Kept separate from activeQ, which is month-scoped, because a stale
+  // stamp can fall in this month while its (edited) running cycle ends in another.
+  const activeStartsQ = db.from("creator_cycles")
+    .select("creator_id, cycle_start_date");
   // Latest daily snapshot per creator+platform for current-views calculation
   const snapsQ = db.from("view_snapshots")
     .select("creator_id, platform, cumulative_views, snapshot_date")
@@ -47,14 +52,29 @@ export async function GET(req: Request) {
   if (ids !== null) {
     completedQ.in("creator_id", ids);
     activeQ.in("creator_id", ids);
+    activeStartsQ.in("creator_id", ids);
     snapsQ.in("creator_id", ids);
   }
 
   const [
-    { data: completed },
+    { data: completedRaw },
     { data: activeCycles },
+    { data: activeStarts },
     { data: latestSnaps },
-  ] = await Promise.all([completedQ, activeQ, snapsQ]);
+  ] = await Promise.all([completedQ, activeQ, activeStartsQ, snapsQ]);
+
+  // A stamped payout whose start matches the creator's CURRENT active-cycle start is a
+  // superseded leftover: the cycle was stamped on completion, then its dates were edited
+  // so it's running again (same start, later end). The creator detail page already hides
+  // these (it filters completed cycles by active start); mirror that here so the Payouts
+  // tab shows the live in-progress cycle instead of the stale stamp. When the running
+  // cycle truly ends, the sync re-stamps this same row (upsert on creator_id+start) with
+  // the corrected end date, and it reappears here as a real completed payout.
+  const activeStartByCreator = new Map<string, string>();
+  for (const c of activeStarts ?? []) activeStartByCreator.set(c.creator_id, c.cycle_start_date);
+  const completed = (completedRaw ?? []).filter(
+    c => activeStartByCreator.get(c.creator_id) !== c.cycle_start_date
+  );
 
   // Helper: sum latest cumulative_views across all platforms for a creator
   const latestTotalViews = (creatorId: string): number => {
