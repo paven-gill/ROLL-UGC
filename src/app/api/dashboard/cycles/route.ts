@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { requireAuth, allowedCreatorIds, isAuthError } from "@/lib/auth";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // GET /api/dashboard/cycles?year=2026&month=5
 //
@@ -30,13 +31,13 @@ export async function GET(req: Request) {
 
   // Completed cycles ending in this month (pending = to pay, paid = already paid)
   const completedQ = db.from("payout_cycles")
-    .select("*, creators(name, instagram_username, tiktok_username)")
+    .select("*, creators(name, instagram_username, tiktok_username, monthly_target)")
     .gte("cycle_end_date", firstDay)
     .lt("cycle_end_date", nextFirstDay)
     .order("cycle_end_date");
   // Active cycles ending in this month (for in-progress estimates)
   const activeQ = db.from("creator_cycles")
-    .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status)")
+    .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status, monthly_target)")
     .gte("cycle_end_date", firstDay)
     .lt("cycle_end_date", nextFirstDay);
   // Every creator's current active-cycle start (any month) — used to drop superseded
@@ -76,6 +77,30 @@ export async function GET(req: Request) {
     c => activeStartByCreator.get(c.creator_id) !== c.cycle_start_date
   );
 
+  // Posts made within each cycle window, for the Posts/target progress column. The
+  // sync deletes+reinserts post_snapshots, so there's one row per post and a count of
+  // rows whose taken_at lands in [start, end) is the post count. Paged to dodge
+  // Supabase's 1000-row cap, lower-bounded ~120 days before the month so a cycle that
+  // ends this month (≤ ~31 days, longer if hand-edited) is fully covered while pages
+  // stay small.
+  const postsLowerBound = new Date(new Date(firstDay + "T00:00:00Z").getTime() - 120 * 86400000)
+    .toISOString().split("T")[0];
+  const postRows = await fetchAllRows<{ creator_id: string; taken_at: string | null }>(
+    (from, to) => {
+      const q = db.from("post_snapshots")
+        .select("creator_id, taken_at")
+        .gte("taken_at", postsLowerBound)
+        .order("taken_at")
+        .range(from, to);
+      if (ids !== null) q.in("creator_id", ids);
+      return q;
+    }
+  );
+  // taken_at is an ISO timestamp; it compares correctly against YYYY-MM-DD bounds
+  // (mirrors the creator detail page's per-cycle post count).
+  const postsInCycle = (creatorId: string, start: string, end: string): number =>
+    postRows.filter(p => p.creator_id === creatorId && p.taken_at && p.taken_at >= start && p.taken_at < end).length;
+
   // Helper: sum latest cumulative_views across all platforms for a creator
   const latestTotalViews = (creatorId: string): number => {
     const snaps = (latestSnaps ?? []).filter(s => s.creator_id === creatorId);
@@ -97,6 +122,7 @@ export async function GET(req: Request) {
         name: string; instagram_username: string | null; tiktok_username: string | null;
         base_fee: number; rate_per_thousand_views: number;
         active: boolean | null; status: "active" | "paused" | "finished" | null;
+        monthly_target: number | null;
       } | null;
       if (!cr) return [];
       if (completedCreatorIds.has(cycle.creator_id)) return [];
@@ -124,13 +150,15 @@ export async function GET(req: Request) {
         base_fee: cr.base_fee,
         view_bonus,
         payout_amount,
+        post_count: postsInCycle(cycle.creator_id, cycle.cycle_start_date, cycle.cycle_end_date),
+        posts_target: cr.monthly_target ?? 30,
         status: "in_progress" as const,
       }];
     });
 
   // Shape completed cycles ending in this month (both pending and paid)
   const completedRows = (completed ?? []).map(c => {
-    const cr = c.creators as { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
+    const cr = c.creators as { name: string; instagram_username: string | null; tiktok_username: string | null; monthly_target: number | null } | null;
     return {
       id: c.id as string,
       creator_id: c.creator_id as string,
@@ -145,6 +173,8 @@ export async function GET(req: Request) {
       base_fee: c.base_fee as number,
       view_bonus: c.view_bonus as number,
       payout_amount: c.payout_amount as number,
+      post_count: postsInCycle(c.creator_id as string, c.cycle_start_date as string, c.cycle_end_date as string),
+      posts_target: cr?.monthly_target ?? 30,
       status: c.status as "pending" | "paid",
     };
   });

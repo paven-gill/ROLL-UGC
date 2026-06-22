@@ -74,6 +74,8 @@ interface CycleRecord {
   base_fee: number;
   view_bonus: number;
   payout_amount: number;
+  post_count: number;
+  posts_target: number;
   status: "pending" | "paid" | "in_progress";
 }
 
@@ -1184,6 +1186,7 @@ function PayoutsTab() {
                 <tr className="border-b border-white/[0.07]">
                   <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-500">Cycle Period</th>
+                  <th className="text-right px-4 py-3 text-xs text-gray-500">Posts</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">Views Earned</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">Base Fee</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">View Bonus</th>
@@ -1213,6 +1216,11 @@ function PayoutsTab() {
                       {new Date(cycle.cycle_start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       {" → "}
                       {new Date(cycle.cycle_end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    {/* Posts this cycle vs target */}
+                    <td className="px-4 py-3.5 text-right tabular-nums">
+                      <span className={cycle.post_count >= cycle.posts_target ? "text-emerald-400" : "text-yellow-400"}>{cycle.post_count}</span>
+                      <span className="text-gray-600">/{cycle.posts_target}</span>
                     </td>
                     {/* Views */}
                     <td className="px-4 py-3.5 text-right text-gray-200 tabular-nums">{fmt(cycle.views_earned)}</td>
@@ -1249,6 +1257,7 @@ function PayoutsTab() {
                   <td className="px-5 py-3.5 font-semibold text-gray-300" colSpan={2}>
                     {MONTHS[selMonth - 1]} {selYear} · Totals
                   </td>
+                  <td />
                   <td className="px-4 py-3.5 text-right font-semibold text-white tabular-nums">
                     {fmt(grandViews)}
                   </td>
