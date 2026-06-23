@@ -3,6 +3,22 @@ import { type ScrapedData } from "@/lib/apify";
 import { uploadTopTikTokThumbs } from "@/lib/thumbnail-storage";
 import { businessDate } from "@/lib/date";
 
+// ─── Where self-calls (cron fan-out + catch-up) should point ─────────────────
+// MUST be the STABLE production domain, never the per-deployment VERCEL_URL —
+// that one sits behind Vercel Deployment Protection and bounces self-calls with
+// a 401 before they reach the function. SYNC_BASE_URL overrides everything
+// (local dev / custom domain); VERCEL_PROJECT_PRODUCTION_URL is the stable prod
+// domain; VERCEL_URL is a last-resort fallback. Returns null if none are set.
+export function resolveSyncBaseUrl(): string | null {
+  return (
+    process.env.SYNC_BASE_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : null) ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+  );
+}
+
 // ─── Store one platform's daily snapshot ─────────────────────────────────────
 // Shared by the per-creator sync route (manual + Instagram) and the batched
 // TikTok endpoint. Self-contained: takes a creator id, platform, and the

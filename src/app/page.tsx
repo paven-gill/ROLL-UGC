@@ -495,6 +495,22 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Self-heal: on load, ask the server whether today's nightly sync landed. If a
+  // run was missed (e.g. it collided with a deploy), this triggers a catch-up.
+  // Fire-and-forget and idempotent server-side (throttle-locked), so it's safe to
+  // run on every mount. Shows a brief note only when it actually kicks one off.
+  const [catchupNote, setCatchupNote] = useState<string | null>(null);
+  useEffect(() => {
+    apiFetch("/api/sync/catchup")
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (d?.action === "triggered") {
+          setCatchupNote("Today's sync had been missed — just caught it up. Refresh to see the latest.");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Chart: daily deltas for rolling/month ranges; 12-month aggregates for all-time
   // For daily views, also fetch completed cycle end dates to overlay payout dot markers.
   useEffect(() => {
@@ -675,6 +691,12 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
 
   return (
     <div className="p-6 space-y-5">
+      {catchupNote && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          {catchupNote}
+        </div>
+      )}
       {/* Filters bar */}
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-600">

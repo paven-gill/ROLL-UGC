@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { cleanupTikTokThumbs } from "@/lib/thumbnail-storage";
+import { resolveSyncBaseUrl } from "@/lib/sync-core";
 import { businessDayOfMonth } from "@/lib/date";
 
 export const maxDuration = 300;
@@ -86,19 +87,9 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Where to send the self-calls. IMPORTANT: do NOT use VERCEL_URL — it's the
-  // per-deployment domain (e.g. project-<hash>.vercel.app), which sits behind
-  // Vercel Deployment Protection. Self-calls to it get bounced with a 401 auth
-  // page before they reach the function, so every child silently fails.
-  // VERCEL_PROJECT_PRODUCTION_URL is the stable production domain, which the
-  // protection layer lets through. SYNC_BASE_URL overrides both (local dev /
-  // custom domain). VERCEL_URL stays only as a last-resort fallback.
-  const baseUrl =
-    process.env.SYNC_BASE_URL ||
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : null) ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+  // Where to send the self-calls — the stable production domain. See
+  // resolveSyncBaseUrl() for why per-deployment VERCEL_URL must not be used.
+  const baseUrl = resolveSyncBaseUrl();
 
   if (!baseUrl) {
     return NextResponse.json(
