@@ -389,6 +389,24 @@ function CreatorPicker({
 
 // ─── Post grid ────────────────────────────────────────────────────────────────
 
+// Thumbnail: native lazy-load (browser fetches ~a screen ahead, so normal
+// scrolling has it ready) plus a gentle fade-in over the dark tile, so nothing
+// flashes. Only on-screen images load up front, keeping initial paint fast.
+function Thumbnail({ url }: { url: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <img
+      src={`/api/proxy-image?url=${encodeURIComponent(url)}`}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onLoad={() => setLoaded(true)}
+      onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+      className={`w-full h-full object-cover group-hover:opacity-80 transition-opacity duration-500 ${loaded ? "opacity-100" : "opacity-0"}`}
+    />
+  );
+}
+
 function PostGrid({ posts, tiktokUsername }: { posts: PostRow[]; tiktokUsername?: string | null }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -408,12 +426,7 @@ function PostGrid({ posts, tiktokUsername }: { posts: PostRow[]; tiktokUsername?
           >
             <div className="relative w-full aspect-[4/5] bg-[#0d0d15]">
               {p.thumbnail_url ? (
-                <img
-                  src={`/api/proxy-image?url=${encodeURIComponent(p.thumbnail_url)}`}
-                  alt=""
-                  className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
-                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
+                <Thumbnail url={p.thumbnail_url} />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-700">
                   <FileVideo size={24} />
@@ -583,22 +596,23 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
           setPostsLoading(false);
         });
     } else {
-      Promise.all(
-        creators.map(c =>
-          apiFetch(`/api/posts/${c.id}`)
-            .then(r => r.json())
-            .then((data: PostRow[]) => ({
-              id: c.id,
-              posts: (Array.isArray(data) ? data : [])
-                .sort((a, b) => b.view_count_used - a.view_count_used),
-            }))
-        )
-      ).then(results => {
-        const map = new Map<string, PostRow[]>();
-        for (const r of results) map.set(r.id, r.posts);
-        setAllCreatorPosts(map);
-        setPostsLoading(false);
-      });
+      // One batched request for every creator's posts instead of one call per
+      // creator. Same data, same per-creator top-by-views ordering as before.
+      apiFetch(`/api/posts/top`)
+        .then(r => r.json())
+        .then((data: Record<string, PostRow[]>) => {
+          const byId = data && typeof data === "object" ? data : {};
+          const map = new Map<string, PostRow[]>();
+          for (const c of creators) {
+            map.set(
+              c.id,
+              (byId[c.id] ?? []).slice().sort((a, b) => b.view_count_used - a.view_count_used)
+            );
+          }
+          setAllCreatorPosts(map);
+          setPostsLoading(false);
+        })
+        .catch(() => { setAllCreatorPosts(new Map()); setPostsLoading(false); });
     }
   }, [selectedCreatorId, creators]);
 
