@@ -4,12 +4,12 @@
 // Routes import scrapeTikTok / scrapeTikTokBatch from HERE (not from apify.ts),
 // so flipping the provider is one env var with zero code changes:
 //
-//   TIKTOK_SCRAPER=scraptik   → ScrapTik (RapidAPI)
-//   TIKTOK_SCRAPER=apify       → Apify (legacy)         [default while testing]
+//   TIKTOK_SCRAPER=scraptik   → ScrapTik (RapidAPI)     [default]
+//   TIKTOK_SCRAPER=apify       → Apify (legacy)          [emergency escape hatch]
 //
-// Defaults to "apify" so nothing changes until you explicitly opt in. Once the
-// side-by-side test (/api/sync/tiktok/test) confirms ScrapTik's numbers line up,
-// set TIKTOK_SCRAPER=scraptik in Vercel and the whole app uses it.
+// The migration is complete: ScrapTik is now the default, so production uses it
+// even if the env var is unset (no silent fallback to Apify). Apify stays wired
+// up only as a break-glass fallback — set TIKTOK_SCRAPER=apify to revert.
 
 import {
   scrapeTikTok as scrapeTikTokApify,
@@ -22,7 +22,9 @@ import { scrapeTikTokScraptik, scrapeTikTokScraptikBatch } from "./scraptik";
 export type { TikTokTarget, ScrapedData };
 
 function useScraptik(): boolean {
-  return (process.env.TIKTOK_SCRAPER ?? "apify").trim().toLowerCase() === "scraptik";
+  // Default to ScrapTik; only the explicit opt-out "apify" reverts to the legacy
+  // scraper. Any other value (including unset/typo) stays on ScrapTik.
+  return (process.env.TIKTOK_SCRAPER ?? "scraptik").trim().toLowerCase() !== "apify";
 }
 
 export function scrapeTikTok(username: string, joinedAt?: string | null): Promise<ScrapedData> {
