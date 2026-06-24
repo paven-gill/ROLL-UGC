@@ -748,7 +748,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
             <DollarSign size={14}/>
           </button>
           <CreatorPicker
-            creators={creators}
+            creators={creators.filter(c => c.status === "active")}
             value={selectedCreatorId}
             onChange={setSelectedCreatorId}
           />
@@ -876,7 +876,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
         ) : (
           /* ── All creators: one section per creator ── */
           <div className="space-y-6">
-            {[...filteredCreators].filter(c => c.status !== "finished")
+            {[...filteredCreators].filter(c => c.status === "active")
               .sort((a, b) => {
                 const aTop = (allCreatorPosts.get(a.id)?.[0]?.view_count_used ?? 0);
                 const bTop = (allCreatorPosts.get(b.id)?.[0]?.view_count_used ?? 0);
@@ -939,6 +939,9 @@ function CreatorsTab({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [editingCreator, setEditingCreator] = useState<CreatorRow | null>(null);
   const [search, setSearch] = useState("");
+  // Defaults to active on every mount (the tab unmounts when you leave it), so
+  // opening Creators always shows active first. Toggle reveals paused/finished.
+  const [statusView, setStatusView] = useState<"active" | "inactive">("active");
 
   function handleSort(key: CreatorSortKey) {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -946,12 +949,14 @@ function CreatorsTab({
   }
 
   const q = search.trim().toLowerCase();
+  const statusFiltered = creators.filter(c =>
+    statusView === "active" ? c.status === "active" : c.status !== "active");
   const filteredCreators = q
-    ? creators.filter(c =>
+    ? statusFiltered.filter(c =>
         c.name.toLowerCase().includes(q) ||
         (c.instagram_username ?? "").toLowerCase().includes(q) ||
         (c.tiktok_username ?? "").toLowerCase().includes(q))
-    : creators;
+    : statusFiltered;
 
   const rows = filteredCreators.map(c => ({ creator: c, ...getAllTimeSummary(c) }));
 
@@ -997,7 +1002,9 @@ function CreatorsTab({
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-gray-500 whitespace-nowrap">
-          {q ? `${filteredCreators.length} of ${creators.length} creators` : `${creators.length} creators`}
+          {q
+            ? `${filteredCreators.length} of ${statusFiltered.length} ${statusView === "active" ? "active" : "paused / inactive"} creators`
+            : `${statusFiltered.length} ${statusView === "active" ? "active" : "paused / inactive"} creators`}
         </p>
         <div className="flex items-center gap-3 flex-1 justify-end">
           <div className="relative w-full max-w-xs">
@@ -1020,6 +1027,20 @@ function CreatorsTab({
             )}
           </div>
           <button
+            onClick={() => setStatusView(v => (v === "active" ? "inactive" : "active"))}
+            title={statusView === "active"
+              ? "Showing active creators — click to show paused / inactive"
+              : "Showing paused / inactive creators — click to show active"}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border whitespace-nowrap transition-colors ${
+              statusView === "active"
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/15"
+                : "bg-yellow-500/10 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/15"
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${statusView === "active" ? "bg-emerald-400" : "bg-yellow-400"}`} />
+            {statusView === "active" ? "Active" : "Paused / Inactive"}
+          </button>
+          <button
             onClick={onAdd}
             className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)] whitespace-nowrap"
           >
@@ -1036,8 +1057,16 @@ function CreatorsTab({
           </div>
         ) : sorted.length === 0 ? (
           <div className="py-16 text-center text-gray-600">
-            No creators match “{search}”.{" "}
-            <button onClick={() => setSearch("")} className="text-emerald-400 hover:underline">Clear search</button>
+            {q ? (
+              <>
+                No creators match “{search}”.{" "}
+                <button onClick={() => setSearch("")} className="text-emerald-400 hover:underline">Clear search</button>
+              </>
+            ) : statusView === "active" ? (
+              "No active creators."
+            ) : (
+              "No paused or inactive creators."
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
