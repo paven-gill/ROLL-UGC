@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense, Fragment } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Users, DollarSign, Zap,
@@ -153,10 +153,10 @@ const NAV: NavItem[] = [
 function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const router = useRouter();
   const { isSuperAdmin, activeCampaignId, logout, email } = useAuth();
-  // Finance lives inside a specific campaign (each brand has its own Wise
-  // account): visible to the Owner when they've selected a campaign, and always
-  // to a Manager (who is locked to their one campaign). Hidden in "All campaigns".
-  const financeAllowed = activeCampaignId !== null;
+  // Finance is always available. In "All campaigns" it shows every brand's paid
+  // payouts (with a Brand column); per-brand Wise reconciliation only appears
+  // when a specific campaign is selected (each brand has its own Wise account).
+  const financeAllowed = true;
 
   return (
     <aside className="w-56 bg-[#07070e]/90 backdrop-blur-3xl border-r border-white/[0.1] flex flex-col shrink-0 sticky top-0 h-screen">
@@ -1389,7 +1389,12 @@ interface PaidCycle {
   status: string;
   paid_at: string | null;
   created_at: string;
-  creators: { name: string; instagram_username: string | null; tiktok_username: string | null } | null;
+  creators: {
+    name: string;
+    instagram_username: string | null;
+    tiktok_username: string | null;
+    campaigns?: { name: string } | { name: string }[] | null;
+  } | null;
   wise?: PayoutWiseMatch | null;
 }
 
@@ -1405,7 +1410,7 @@ interface WiseTransferRow {
   created: string | null;
 }
 
-function FinanceTab() {
+function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<WiseData | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
@@ -1416,6 +1421,13 @@ function FinanceTab() {
   const [paidCycles, setPaidCycles] = useState<PaidCycle[]>([]);
   const [transactions, setTransactions] = useState<WiseTransferRow[]>([]);
   const [monthFilter, setMonthFilter] = useState("all");
+  // Which payout row is expanded to show its base + bonus breakdown.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const brandName = (c: PaidCycle): string => {
+    const camp = c.creators?.campaigns;
+    const obj = Array.isArray(camp) ? camp[0] : camp;
+    return obj?.name ?? "—";
+  };
 
   // Group payouts by the month they were paid (fallback to record creation).
   const payMonthKey = (c: PaidCycle) => (c.paid_at ?? c.created_at ?? "").slice(0, 7);
@@ -1441,13 +1453,16 @@ function FinanceTab() {
   }
 
   useEffect(() => {
-    fetchBalance();
+    // Always load the cross-brand payout history. Wise (balance + transactions)
+    // is per-brand, so skip it entirely in the All Brands portfolio view.
     apiFetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
+    if (allBrands) { setLoading(false); return; }
+    fetchBalance();
     apiFetch("/api/wise/transactions")
       .then(r => r.json())
       .then(d => setTransactions(Array.isArray(d?.transactions) ? d.transactions : []))
       .catch(() => setTransactions([]));
-  }, []);
+  }, [allBrands]);
 
   async function handleConnect() {
     if (!token.trim()) return;
@@ -1511,6 +1526,167 @@ function FinanceTab() {
     a.download = `payouts-${monthFilter === "all" ? "all" : monthFilter}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Cross-brand-aware payout history: every payout paid via the dashboard, with a
+  // click-to-expand breakdown (base fee + view bonus + discretionary bonus). In
+  // All Brands it gains a Brand column and drops the per-brand Wise column.
+  const COLS = 6; // Brand|Creator..Amount (all brands) OR Creator..Amount|Wise — both 6
+  function payoutHistorySection() {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[11px] text-gray-600 uppercase tracking-wider">
+            {allBrands ? "Paid via Dashboard · all brands" : "Paid via Dashboard"}
+          </p>
+          {paidCycles.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                value={monthFilter}
+                onChange={e => setMonthFilter(e.target.value)}
+                className="text-xs text-gray-300 bg-white/[0.04] border border-white/[0.1] hover:border-white/[0.25] focus:border-emerald-500/40 focus:outline-none rounded-lg px-2.5 py-1.5 transition-all cursor-pointer"
+              >
+                <option value="all">All time</option>
+                {availableMonths.map(m => (
+                  <option key={m} value={m}>{monthLabel(m)}</option>
+                ))}
+              </select>
+              <button
+                onClick={exportPayoutsCSV}
+                className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-white/[0.1] hover:border-white/[0.25] rounded-lg px-3 py-1.5 transition-all"
+              >
+                <Download size={12} />
+                Export CSV
+              </button>
+            </div>
+          )}
+        </div>
+        {paidCycles.length === 0 ? (
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
+            No completed payouts yet.
+          </div>
+        ) : visibleCycles.length === 0 ? (
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
+            No payouts in {monthLabel(monthFilter)}.
+          </div>
+        ) : (
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/[0.07]">
+                  {allBrands && <th className="text-left px-5 py-3 text-xs text-gray-500">Brand</th>}
+                  <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-500">Period</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-500">Paid</th>
+                  <th className="text-right px-4 py-3 text-xs text-gray-500">Views</th>
+                  <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
+                  {!allBrands && <th className="text-center px-5 py-3 text-xs text-gray-500">Wise</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleCycles.map(c => {
+                  const open = expandedId === c.id;
+                  const disc = c.bonus_amount ?? 0;
+                  return (
+                    <Fragment key={c.id}>
+                      <tr
+                        onClick={() => setExpandedId(open ? null : c.id)}
+                        className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer"
+                      >
+                        {allBrands && (
+                          <td className="px-5 py-3.5 text-gray-300 text-xs whitespace-nowrap">{brandName(c)}</td>
+                        )}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-2">
+                            <ChevronDown size={12} className={`text-gray-600 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+                            <p className="text-white font-medium text-sm">{c.creators?.name ?? "—"}</p>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
+                          {new Date(c.cycle_start_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric" })}
+                          {" → "}
+                          {new Date(c.cycle_end_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })}
+                        </td>
+                        <td className="px-4 py-3.5 text-gray-400 text-xs whitespace-nowrap">
+                          {(c.paid_at ?? c.created_at)
+                            ? new Date(c.paid_at ?? c.created_at).toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3.5 text-right text-gray-400 text-xs tabular-nums">{fmt(c.views_earned)}</td>
+                        <td className="px-4 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
+                          {fmtMoney(c.payout_amount)}
+                        </td>
+                        {!allBrands && (
+                          <td className="px-5 py-3.5 text-center">
+                            <WiseMatchBadge match={c.wise} />
+                          </td>
+                        )}
+                      </tr>
+                      {open && (
+                        <tr className="bg-white/[0.015] border-b border-white/[0.04]">
+                          <td colSpan={COLS} className="px-5 pb-4 pt-1">
+                            <div className="flex flex-wrap gap-x-10 gap-y-2 text-xs">
+                              <div>
+                                <p className="text-gray-600 mb-0.5">Base fee</p>
+                                <p className="text-white font-medium tabular-nums">{fmtMoney(c.base_fee)}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-600 mb-0.5">View bonus</p>
+                                <p className="text-white font-medium tabular-nums">{fmtMoney(c.view_bonus)}</p>
+                                <p className="text-gray-700 mt-0.5">{fmt(c.views_earned)} views</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-600 mb-0.5">Discretionary bonus</p>
+                                <p className={`font-medium tabular-nums ${disc > 0 ? "text-white" : "text-gray-600"}`}>{fmtMoney(disc)}</p>
+                                {c.bonus_note && <p className="text-gray-500 mt-0.5 max-w-[260px]">{c.bonus_note}</p>}
+                              </div>
+                              <div className="ml-auto text-right">
+                                <p className="text-gray-600 mb-0.5">Total paid</p>
+                                <p className="text-emerald-400 font-bold tabular-nums">{fmtMoney(c.payout_amount)}</p>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-white/[0.07] bg-white/[0.02]">
+                  {/* Amount is the last column in All Brands, else 2nd-last (Wise trails). */}
+                  <td colSpan={allBrands ? COLS - 1 : COLS - 2} className="px-5 py-3 text-xs text-gray-500">
+                    Total paid{monthFilter !== "all" ? ` · ${monthLabel(monthFilter)}` : ""}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-400 tabular-nums">
+                    {fmtMoney(visibleCycles.reduce((s, c) => s + c.payout_amount, 0))}
+                  </td>
+                  {!allBrands && <td />}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // All Brands portfolio view: just the cross-brand payout history (Wise is
+  // per-brand, so its panels only appear when a single campaign is selected).
+  if (allBrands) {
+    return (
+      <div className="p-6 space-y-5">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Finance · All Brands</h2>
+          <p className="text-xs text-gray-600 mt-0.5">Every payout sent via the dashboard. Select a brand for its Wise balance &amp; reconciliation.</p>
+        </div>
+        {loading ? (
+          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
+            Loading payouts…
+          </div>
+        ) : payoutHistorySection()}
+      </div>
+    );
   }
 
   return (
@@ -1629,94 +1805,8 @@ function FinanceTab() {
             </div>
           </div>
 
-          {/* Dashboard payout history */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] text-gray-600 uppercase tracking-wider">Paid via Dashboard</p>
-              {paidCycles.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <select
-                    value={monthFilter}
-                    onChange={e => setMonthFilter(e.target.value)}
-                    className="text-xs text-gray-300 bg-white/[0.04] border border-white/[0.1] hover:border-white/[0.25] focus:border-emerald-500/40 focus:outline-none rounded-lg px-2.5 py-1.5 transition-all cursor-pointer"
-                  >
-                    <option value="all">All time</option>
-                    {availableMonths.map(m => (
-                      <option key={m} value={m}>{monthLabel(m)}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={exportPayoutsCSV}
-                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-white/[0.1] hover:border-white/[0.25] rounded-lg px-3 py-1.5 transition-all"
-                  >
-                    <Download size={12} />
-                    Export CSV
-                  </button>
-                </div>
-              )}
-            </div>
-            {paidCycles.length === 0 ? (
-              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
-                No completed payouts yet.
-              </div>
-            ) : visibleCycles.length === 0 ? (
-              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
-                No payouts in {monthLabel(monthFilter)}.
-              </div>
-            ) : (
-              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-white/[0.07]">
-                      <th className="text-left px-5 py-3 text-xs text-gray-500">Creator</th>
-                      <th className="text-left px-4 py-3 text-xs text-gray-500">Period</th>
-                      <th className="text-left px-4 py-3 text-xs text-gray-500">Paid</th>
-                      <th className="text-right px-4 py-3 text-xs text-gray-500">Views</th>
-                      <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
-                      <th className="text-center px-5 py-3 text-xs text-gray-500">Wise</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleCycles.map(c => (
-                      <tr key={c.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
-                        <td className="px-5 py-3.5">
-                          <p className="text-white font-medium text-sm">{c.creators?.name ?? "—"}</p>
-                        </td>
-                        <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
-                          {new Date(c.cycle_start_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric" })}
-                          {" → "}
-                          {new Date(c.cycle_end_date + "T00:00:00").toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })}
-                        </td>
-                        <td className="px-4 py-3.5 text-gray-400 text-xs whitespace-nowrap">
-                          {(c.paid_at ?? c.created_at)
-                            ? new Date(c.paid_at ?? c.created_at).toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" })
-                            : "—"}
-                        </td>
-                        <td className="px-4 py-3.5 text-right text-gray-400 text-xs tabular-nums">{fmt(c.views_earned)}</td>
-                        <td className="px-4 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
-                          {fmtMoney(c.payout_amount)}
-                        </td>
-                        <td className="px-5 py-3.5 text-center">
-                          <WiseMatchBadge match={c.wise} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t border-white/[0.07] bg-white/[0.02]">
-                      <td colSpan={4} className="px-5 py-3 text-xs text-gray-500">
-                        Total paid{monthFilter !== "all" ? ` · ${monthLabel(monthFilter)}` : ""}
-                      </td>
-                      <td className="px-4 py-3 text-right font-bold text-emerald-400 tabular-nums">
-                        {fmtMoney(visibleCycles.reduce((s, c) => s + c.payout_amount, 0))}
-                      </td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </div>
+          {/* Dashboard payout history (click a row for the base + bonus breakdown) */}
+          {payoutHistorySection()}
 
           {/* Real Wise transactions */}
           <div>
@@ -1822,7 +1912,9 @@ function DashboardInner() {
   // (each brand has its own creators, payouts, Wise account). A Manager is always
   // locked to one campaign, so they always have these.
   const isAllCampaigns = activeCampaignId === null;
-  const financeAllowed = !isAllCampaigns;
+  // Finance is available everywhere; in "All campaigns" it lists every brand's
+  // paid payouts and hides the per-brand Wise panels (see FinanceTab).
+  const financeAllowed = true;
   const now = new Date();
 
   const [activeTab, setActiveTab] = useState<Tab>(() => {
@@ -1916,7 +2008,7 @@ function DashboardInner() {
             {activeTab === "payouts" && (
               isAllCampaigns ? <PickCampaignNotice what="payouts" /> : <PayoutsTab />
             )}
-            {activeTab === "finance" && financeAllowed && <FinanceTab />}
+            {activeTab === "finance" && financeAllowed && <FinanceTab allBrands={isAllCampaigns} />}
           </>
         )}
       </div>

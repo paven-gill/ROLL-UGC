@@ -30,7 +30,8 @@ export async function GET(req: Request) {
       creators (
         name,
         instagram_username,
-        tiktok_username
+        tiktok_username,
+        campaigns ( name )
       )
     `)
     .eq("status", "paid")
