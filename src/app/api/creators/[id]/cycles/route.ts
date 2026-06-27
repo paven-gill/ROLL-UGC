@@ -22,15 +22,15 @@ export async function GET(
     { data: allPosts },
   ] = await Promise.all([
     db.from("creator_cycles")
-      .select("creator_id, cycle_start_date, cycle_end_date, baseline_views")
+      .select("creator_id, cycle_start_date, cycle_end_date, baseline_views, baseline_capped_views")
       .eq("creator_id", creatorId)
       .single(),
     db.from("payout_cycles")
-      .select("id, cycle_start_date, cycle_end_date, views_earned, payout_amount, base_fee, view_bonus, status")
+      .select("id, cycle_start_date, cycle_end_date, views_earned, capped_views_earned, payout_amount, base_fee, view_bonus, status")
       .eq("creator_id", creatorId)
       .order("cycle_end_date", { ascending: false }),
     db.from("view_snapshots")
-      .select("platform, cumulative_views, snapshot_date, synced_at")
+      .select("platform, cumulative_views, capped_cumulative_views, snapshot_date, synced_at")
       .eq("creator_id", creatorId)
       .order("snapshot_date", { ascending: false }),
     db.from("post_snapshots")
@@ -41,11 +41,16 @@ export async function GET(
   const lastSyncedAt = latestSnaps?.[0]?.synced_at ?? null;
   console.log(`[cycles] creator=${creatorId} activeCycleRow=`, activeCycleRow, `completedCycles=`, completedCycles?.length ?? 0);
 
+  // True current total (displayed) and capped current total (drives the projected
+  // payout). Equal until a video crosses the cap.
   const byPlatform = new Map<string, number>();
+  const cappedByPlatform = new Map<string, number>();
   for (const s of (latestSnaps ?? [])) {
     if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
+    if (!cappedByPlatform.has(s.platform)) cappedByPlatform.set(s.platform, s.capped_cumulative_views ?? 0);
   }
   const currentTotalViews = Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
+  const currentCappedViews = Array.from(cappedByPlatform.values()).reduce((a, b) => a + b, 0);
 
   let activeCycle = null;
   if (activeCycleRow) {
@@ -54,6 +59,7 @@ export async function GET(
     const endDate = activeCycleRow.cycle_end_date;
     const notStarted = today < startDate;
     const viewsEarned = notStarted ? 0 : Math.max(0, currentTotalViews - (activeCycleRow.baseline_views ?? 0));
+    const viewsEarnedCapped = notStarted ? 0 : Math.max(0, currentCappedViews - (activeCycleRow.baseline_capped_views ?? 0));
     const daysRemaining = notStarted ? 0 : Math.max(0, Math.ceil(
       (new Date(endDate + "T00:00:00").getTime() - new Date(today + "T00:00:00").getTime()) / 86400000
     ));
@@ -71,6 +77,7 @@ export async function GET(
       cycle_end_date: endDate,
       baseline_views: activeCycleRow.baseline_views,
       views_earned: viewsEarned,
+      views_earned_capped: viewsEarnedCapped,
       days_remaining: daysRemaining,
       not_started: notStarted,
       days_until_start: daysUntilStart,
@@ -91,6 +98,7 @@ export async function GET(
       cycle_start_date: c.cycle_start_date as string,
       cycle_end_date: c.cycle_end_date as string,
       views_earned: c.views_earned as number,
+      views_earned_capped: c.capped_views_earned as number,
       payout_amount: c.payout_amount as number | null,
       base_fee: c.base_fee as number,
       view_bonus: c.view_bonus as number,
@@ -107,6 +115,7 @@ export async function GET(
           cycle_start_date: activeCycle.cycle_start_date,
           cycle_end_date: activeCycle.cycle_end_date,
           views_earned: activeCycle.views_earned,
+          views_earned_capped: activeCycle.views_earned_capped,
           payout_amount: null as number | null,
           base_fee: 0,
           view_bonus: 0,
@@ -147,19 +156,23 @@ export async function PATCH(
   const startMs = new Date(cycle_start_date + "T00:00:00Z").getTime();
   const endDate = customEndDate ?? new Date(startMs + 30 * 86400000).toISOString().split("T")[0];
 
-  // Find baseline_views from the most recent view_snapshot on or before new start date
+  // Find baseline views from the most recent view_snapshot on or before new start
+  // date — both the true total (display) and the capped (payable) basis.
   const { data: snaps } = await db
     .from("view_snapshots")
-    .select("platform, cumulative_views, snapshot_date")
+    .select("platform, cumulative_views, capped_cumulative_views, snapshot_date")
     .eq("creator_id", creatorId)
     .lte("snapshot_date", cycle_start_date)
     .order("snapshot_date", { ascending: false });
 
   const byPlatform = new Map<string, number>();
+  const cappedByPlatform = new Map<string, number>();
   for (const s of snaps ?? []) {
     if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
+    if (!cappedByPlatform.has(s.platform)) cappedByPlatform.set(s.platform, s.capped_cumulative_views ?? 0);
   }
   const baseline_views = Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
+  const baseline_capped_views = Array.from(cappedByPlatform.values()).reduce((a, b) => a + b, 0);
 
   const { error } = await db
     .from("creator_cycles")
@@ -167,6 +180,7 @@ export async function PATCH(
       cycle_start_date,
       cycle_end_date: endDate,
       baseline_views,
+      baseline_capped_views,
       updated_at: new Date().toISOString(),
     })
     .eq("creator_id", creatorId);

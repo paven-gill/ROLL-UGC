@@ -26,8 +26,8 @@ export async function GET(req: Request) {
     ids === null ? creatorsQ : creatorsQ.in("id", ids),
     scopeToCreators(db.from("monthly_metrics").select("*").order("year", { ascending: false }).order("month", { ascending: false }), ids),
     scopeToCreators(db.from("payout_cycles").select("creator_id, payout_amount, views_earned, status"), ids),
-    scopeToCreators(db.from("creator_cycles").select("creator_id, baseline_views"), ids),
-    scopeToCreators(db.from("view_snapshots").select("creator_id, platform, snapshot_date, cumulative_views").order("snapshot_date", { ascending: false }), ids),
+    scopeToCreators(db.from("creator_cycles").select("creator_id, baseline_views, baseline_capped_views"), ids),
+    scopeToCreators(db.from("view_snapshots").select("creator_id, platform, snapshot_date, cumulative_views, capped_cumulative_views").order("snapshot_date", { ascending: false }), ids),
     scopeToCreators(db.from("post_snapshots").select("creator_id"), ids),
   ]);
 
@@ -49,24 +49,33 @@ export async function GET(req: Request) {
     payoutsByCreator.set(p.creator_id, existing);
   }
 
-  // Baseline views per creator from their active cycle
+  // Baseline views per creator from their active cycle — true (display) + capped (payout)
   const baselineByCreator = new Map<string, number>();
+  const cappedBaselineByCreator = new Map<string, number>();
   for (const c of cycles ?? []) {
     baselineByCreator.set(c.creator_id, c.baseline_views ?? 0);
+    cappedBaselineByCreator.set(c.creator_id, c.baseline_capped_views ?? 0);
   }
 
-  // Latest cumulative_views per creator+platform (snapshots already ordered desc by date)
+  // Latest views per creator+platform (snapshots already ordered desc by date)
   const latestSnapByKey = new Map<string, number>();
+  const latestCappedByKey = new Map<string, number>();
   for (const s of snapshots ?? []) {
     const key = `${s.creator_id}::${s.platform}`;
     if (!latestSnapByKey.has(key)) latestSnapByKey.set(key, s.cumulative_views ?? 0);
+    if (!latestCappedByKey.has(key)) latestCappedByKey.set(key, s.capped_cumulative_views ?? 0);
   }
 
-  // Sum latest cumulative views per creator across all platforms
+  // Sum latest views per creator across all platforms (true + capped)
   const latestTotalByCreator = new Map<string, number>();
   latestSnapByKey.forEach((cumViews, key) => {
     const creatorId = key.split("::")[0];
     latestTotalByCreator.set(creatorId, (latestTotalByCreator.get(creatorId) ?? 0) + cumViews);
+  });
+  const latestCappedTotalByCreator = new Map<string, number>();
+  latestCappedByKey.forEach((cumViews, key) => {
+    const creatorId = key.split("::")[0];
+    latestCappedTotalByCreator.set(creatorId, (latestCappedTotalByCreator.get(creatorId) ?? 0) + cumViews);
   });
 
   // Count tracked posts per creator from post_snapshots (respects exclusions)
@@ -78,12 +87,16 @@ export async function GET(req: Request) {
   const result = (creators ?? []).map(c => {
     const baseline = baselineByCreator.get(c.id) ?? 0;
     const latestTotal = latestTotalByCreator.get(c.id) ?? 0;
+    const cappedBaseline = cappedBaselineByCreator.get(c.id) ?? 0;
+    const latestCappedTotal = latestCappedTotalByCreator.get(c.id) ?? 0;
     return {
       ...c,
       metrics: metricsByCreator.get(c.id) ?? [],
       completed_payout_total: payoutsByCreator.get(c.id)?.completed_payout_total ?? 0,
       completed_views_total:  payoutsByCreator.get(c.id)?.completed_views_total  ?? 0,
+      // True delta for display; capped delta for the in-progress payout estimate.
       current_cycle_views: Math.max(0, latestTotal - baseline),
+      current_cycle_capped_views: Math.max(0, latestCappedTotal - cappedBaseline),
       tracked_post_count: postCountByCreator.get(c.id) ?? 0,
     };
   });

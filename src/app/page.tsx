@@ -29,6 +29,7 @@ interface CreatorRow extends Creator {
   completed_payout_total: number;
   completed_views_total: number;
   current_cycle_views: number;
+  current_cycle_capped_views: number;
   tracked_post_count: number;
 }
 
@@ -71,6 +72,7 @@ interface CycleRecord {
   start_views: number;
   end_views: number | null;
   views_earned: number;
+  capped_views_earned: number;
   base_fee: number;
   view_bonus: number;
   payout_amount: number;
@@ -117,11 +119,14 @@ function getAllTimeSummary(creator: CreatorRow) {
   const allPosts = creator.tracked_post_count ?? 0;
 
   // All-time views = views earned in completed cycles + views earned in current cycle
+  // (TRUE, uncapped — display only).
   const allViews = (creator.completed_views_total ?? 0) + (creator.current_cycle_views ?? 0);
 
-  // Total paid = completed cycle payouts + view bonus for the current in-progress cycle
+  // Total paid = completed cycle payouts + view bonus for the current in-progress
+  // cycle. The bonus is on the CAPPED (payable) current-cycle views, so payments
+  // cap per video even while allViews above stays true.
   const totalPayout = (creator.completed_payout_total ?? 0)
-    + ((creator.current_cycle_views ?? 0) / 1000) * creator.rate_per_thousand_views;
+    + ((creator.current_cycle_capped_views ?? 0) / 1000) * creator.rate_per_thousand_views;
   return { allViews, allPosts, totalPayout };
 }
 

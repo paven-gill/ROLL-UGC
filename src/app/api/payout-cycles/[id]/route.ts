@@ -56,7 +56,12 @@ export async function PATCH(
       .update({
         cycle_start_date: newStartDate,
         cycle_end_date: newEndDate,
+        // start_views holds the capped (payable) basis, which is what the payout
+        // delta is computed against, so it seeds baseline_capped_views directly.
+        // baseline_views (true, display-only) equals it until a video exceeds the
+        // cap; seeding both from start_views is exact pre-cap and harmless after.
         baseline_views: existing.start_views ?? 0,
+        baseline_capped_views: existing.start_views ?? 0,
         updated_at: new Date().toISOString(),
       })
       .eq("creator_id", existing.creator_id);

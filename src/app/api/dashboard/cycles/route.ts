@@ -45,9 +45,10 @@ export async function GET(req: Request) {
   // stamp can fall in this month while its (edited) running cycle ends in another.
   const activeStartsQ = db.from("creator_cycles")
     .select("creator_id, cycle_start_date");
-  // Latest daily snapshot per creator+platform for current-views calculation
+  // Latest daily snapshot per creator+platform for current-views calculation.
+  // True views are displayed; the capped series drives the payout estimate.
   const snapsQ = db.from("view_snapshots")
-    .select("creator_id, platform, cumulative_views, snapshot_date")
+    .select("creator_id, platform, cumulative_views, capped_cumulative_views, snapshot_date")
     .order("snapshot_date", { ascending: false });
   // Campaign scope: constrain each creator-keyed query unless super_admin viewing all.
   if (ids !== null) {
@@ -101,12 +102,14 @@ export async function GET(req: Request) {
   const postsInCycle = (creatorId: string, start: string, end: string): number =>
     postRows.filter(p => p.creator_id === creatorId && p.taken_at && p.taken_at >= start && p.taken_at < end).length;
 
-  // Helper: sum latest cumulative_views across all platforms for a creator
-  const latestTotalViews = (creatorId: string): number => {
+  // Helper: sum latest views across all platforms for a creator. `capped=true`
+  // returns the payable basis; otherwise the true total.
+  const latestViews = (creatorId: string, capped: boolean): number => {
     const snaps = (latestSnaps ?? []).filter(s => s.creator_id === creatorId);
     const byPlatform = new Map<string, number>();
     for (const s of snaps) {
-      if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
+      const v = capped ? (s.capped_cumulative_views ?? 0) : (s.cumulative_views ?? 0);
+      if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, v);
     }
     return Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
   };
@@ -131,9 +134,10 @@ export async function GET(req: Request) {
       // still appear above, since those are real amounts owed or already paid.)
       if (cr.active === false || cr.status === "paused" || cr.status === "finished") return [];
 
-      const currentViews = latestTotalViews(cycle.creator_id);
-      const views_so_far = Math.max(0, currentViews - (cycle.baseline_views ?? 0));
-      const view_bonus = parseFloat(((views_so_far / 1000) * cr.rate_per_thousand_views).toFixed(2));
+      // Displayed views earned use the true series; the payout uses the capped one.
+      const views_so_far = Math.max(0, latestViews(cycle.creator_id, false) - (cycle.baseline_views ?? 0));
+      const capped_so_far = Math.max(0, latestViews(cycle.creator_id, true) - (cycle.baseline_capped_views ?? 0));
+      const view_bonus = parseFloat(((capped_so_far / 1000) * cr.rate_per_thousand_views).toFixed(2));
       const payout_amount = parseFloat((cr.base_fee + view_bonus).toFixed(2));
 
       return [{
@@ -147,6 +151,7 @@ export async function GET(req: Request) {
         start_views: cycle.baseline_views,
         end_views: null as number | null,
         views_earned: views_so_far,
+        capped_views_earned: capped_so_far,
         base_fee: cr.base_fee,
         view_bonus,
         payout_amount,
@@ -170,6 +175,7 @@ export async function GET(req: Request) {
       start_views: c.start_views as number,
       end_views: c.end_views as number,
       views_earned: c.views_earned as number,
+      capped_views_earned: c.capped_views_earned as number,
       base_fee: c.base_fee as number,
       view_bonus: c.view_bonus as number,
       payout_amount: c.payout_amount as number,

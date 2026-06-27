@@ -19,13 +19,16 @@ CREATE TABLE creators (
 
 -- ─── Daily tracking (analytics / debugging) ───────────────────────────────────
 -- One row per creator+platform per day. cumulative_views = total eligible views
--- (posts >= joined_at) as of that scrape. Not used for payouts directly.
+-- (posts >= joined_at) as of that scrape. capped_cumulative_views is the same
+-- total with each video clamped at PER_VIDEO_VIEW_CAP — the payable basis used
+-- for payouts. The two are equal until a video crosses the cap.
 
 CREATE TABLE view_snapshots (
   creator_id UUID REFERENCES creators(id) ON DELETE CASCADE,
   platform TEXT NOT NULL CHECK (platform IN ('instagram', 'tiktok')),
   snapshot_date DATE NOT NULL,
-  cumulative_views BIGINT NOT NULL DEFAULT 0,
+  cumulative_views BIGINT NOT NULL DEFAULT 0,           -- TRUE total (displayed)
+  capped_cumulative_views BIGINT NOT NULL DEFAULT 0,    -- payable basis: sum(min(post_views, cap))
   post_count_30d INTEGER DEFAULT 0,
   follower_count INTEGER DEFAULT 0,
   synced_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -40,7 +43,8 @@ CREATE TABLE creator_cycles (
   creator_id UUID PRIMARY KEY REFERENCES creators(id) ON DELETE CASCADE,
   cycle_start_date DATE NOT NULL,         -- start of current cycle
   cycle_end_date DATE NOT NULL,           -- cycle_start_date + 30 days
-  baseline_views BIGINT NOT NULL DEFAULT 0, -- total eligible views at cycle start
+  baseline_views BIGINT NOT NULL DEFAULT 0,        -- TRUE total eligible views at cycle start
+  baseline_capped_views BIGINT NOT NULL DEFAULT 0, -- payable basis at cycle start
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -53,11 +57,12 @@ CREATE TABLE payout_cycles (
   creator_id UUID REFERENCES creators(id) ON DELETE CASCADE,
   cycle_start_date DATE NOT NULL,
   cycle_end_date DATE NOT NULL,
-  start_views BIGINT NOT NULL,            -- baseline_views at cycle start
-  end_views BIGINT NOT NULL,              -- total eligible views at cycle end
-  views_earned BIGINT NOT NULL,           -- end_views - start_views
+  start_views BIGINT NOT NULL,            -- TRUE views at cycle start (display)
+  end_views BIGINT NOT NULL,              -- TRUE views at cycle end (display)
+  views_earned BIGINT NOT NULL,           -- end_views - start_views (TRUE, display)
+  capped_views_earned BIGINT NOT NULL DEFAULT 0, -- payable delta (drives payout)
   base_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
-  view_bonus DECIMAL(10,2) NOT NULL DEFAULT 0,
+  view_bonus DECIMAL(10,2) NOT NULL DEFAULT 0,    -- (capped_views_earned / 1000) * rate
   bonus_amount DECIMAL(10,2) NOT NULL DEFAULT 0,    -- discretionary bonus added at pay time
   bonus_note TEXT,
   payout_amount DECIMAL(10,2) NOT NULL DEFAULT 0,

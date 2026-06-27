@@ -118,6 +118,7 @@ export async function POST(req: NextRequest) {
     start_views = 0,
     end_views = 0,
     views_earned = 0,
+    capped_views_earned = 0,
     base_fee,
     view_bonus,
     bonus_amount = 0,
@@ -139,6 +140,7 @@ export async function POST(req: NextRequest) {
   const safeStartViews = start_views ?? 0;
   const safeEndViews = end_views ?? 0;
   const safeViewsEarned = views_earned ?? 0;
+  const safeCappedViewsEarned = capped_views_earned ?? 0;
 
   if (type === "in_progress") {
     // Close the cycle: create payout_cycles record
@@ -152,6 +154,7 @@ export async function POST(req: NextRequest) {
           start_views: safeStartViews,
           end_views: safeEndViews,
           views_earned: safeViewsEarned,
+          capped_views_earned: safeCappedViewsEarned,
           base_fee,
           view_bonus,
           bonus_amount: bonus_amount ?? 0,
@@ -168,18 +171,22 @@ export async function POST(req: NextRequest) {
     if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
     finalCycleId = newCycle.id;
 
-    // Get latest snapshots as new baseline for the next cycle
+    // Get latest snapshots as new baseline for the next cycle — both the true
+    // total and the capped (payable) basis.
     const { data: snaps } = await db
       .from("view_snapshots")
-      .select("platform, cumulative_views")
+      .select("platform, cumulative_views, capped_cumulative_views")
       .eq("creator_id", creator_id)
       .order("snapshot_date", { ascending: false });
 
     const byPlatform = new Map<string, number>();
+    const cappedByPlatform = new Map<string, number>();
     for (const s of snaps ?? []) {
       if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
+      if (!cappedByPlatform.has(s.platform)) cappedByPlatform.set(s.platform, s.capped_cumulative_views ?? 0);
     }
     const newBaseline = Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
+    const newCappedBaseline = Array.from(cappedByPlatform.values()).reduce((a, b) => a + b, 0);
 
     // Start next cycle from the day after this cycle ended
     const nextStart = new Date(cycle_end_date + "T00:00:00Z");
@@ -191,6 +198,7 @@ export async function POST(req: NextRequest) {
       cycle_start_date: nextStart.toISOString().split("T")[0],
       cycle_end_date: nextEnd.toISOString().split("T")[0],
       baseline_views: newBaseline,
+      baseline_capped_views: newCappedBaseline,
       updated_at: new Date().toISOString(),
     }).eq("creator_id", creator_id);
 

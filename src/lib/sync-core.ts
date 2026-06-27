@@ -2,6 +2,7 @@ import { createServerClient } from "@/lib/supabase";
 import { type ScrapedData } from "@/lib/apify";
 import { uploadTopTikTokThumbs } from "@/lib/thumbnail-storage";
 import { businessDate } from "@/lib/date";
+import { PER_VIDEO_VIEW_CAP } from "@/lib/constants";
 
 // ─── Where self-calls (cron fan-out + catch-up) should point ─────────────────
 // MUST be the STABLE production domain, never the per-deployment VERCEL_URL —
@@ -49,12 +50,21 @@ export async function storeSnapshot(
     .reduce((s, p) => s + p.view_count_used, 0);
   const adjustedCumulativeViews = Math.max(0, data.cumulative_views - excludedViewsSum);
 
+  // Capped (payable) cumulative: each video contributes at most PER_VIDEO_VIEW_CAP.
+  // cumulative_views above is exactly sum(view_count_used), so the capped total is
+  // the same sum with each post clamped. Equals the true total until a video
+  // crosses the cap; only then does the payable basis fall below the display total.
+  const cappedCumulativeViews = data.posts
+    .filter(p => !excludedIdsForViews.has(p.post_id))
+    .reduce((s, p) => s + Math.min(p.view_count_used, PER_VIDEO_VIEW_CAP), 0);
+
   await db.from("view_snapshots").upsert(
     {
       creator_id: creatorId,
       platform,
       snapshot_date: today,
       cumulative_views: adjustedCumulativeViews,
+      capped_cumulative_views: cappedCumulativeViews,
       post_count_30d: data.posts_last_30_days,
       follower_count: data.follower_count,
       synced_at: now,
@@ -166,17 +176,24 @@ export async function processCycle(
   const today = businessDate();
 
   // Current total eligible views = latest daily snapshot per platform, summed.
+  // We track both the TRUE total (cumulative_views, for display/back-compat) and
+  // the CAPPED total (capped_cumulative_views, the payable basis). Payouts use
+  // capped; baselines store both so each cycle's earned delta is computed on the
+  // capped series. The two are equal until a video crosses PER_VIDEO_VIEW_CAP.
   const { data: snaps } = await db
     .from("view_snapshots")
-    .select("platform, cumulative_views, snapshot_date")
+    .select("platform, cumulative_views, capped_cumulative_views, snapshot_date")
     .eq("creator_id", creator.id)
     .order("snapshot_date", { ascending: false });
 
   const byPlatform = new Map<string, number>();
+  const cappedByPlatform = new Map<string, number>();
   for (const s of snaps ?? []) {
     if (!byPlatform.has(s.platform)) byPlatform.set(s.platform, s.cumulative_views ?? 0);
+    if (!cappedByPlatform.has(s.platform)) cappedByPlatform.set(s.platform, s.capped_cumulative_views ?? 0);
   }
   const totalViews = Array.from(byPlatform.values()).reduce((a, b) => a + b, 0);
+  const cappedTotalViews = Array.from(cappedByPlatform.values()).reduce((a, b) => a + b, 0);
 
   const { data: cycle } = await db
     .from("creator_cycles")
@@ -196,6 +213,7 @@ export async function processCycle(
       cycle_start_date: cycleStart,
       cycle_end_date: cycleEnd,
       baseline_views: totalViews,
+      baseline_capped_views: cappedTotalViews,
     });
 
     if (insertError) {
@@ -207,8 +225,9 @@ export async function processCycle(
   }
 
   // Cycle still within its term — report progress, change nothing.
+  // Progress is the payable (capped) delta, matching how the payout is computed.
   if (today < cycle.cycle_end_date) {
-    const views_so_far = Math.max(0, totalViews - (cycle.baseline_views ?? 0));
+    const views_so_far = Math.max(0, cappedTotalViews - (cycle.baseline_capped_views ?? 0));
     console.log(`[cycle] ${creator.id}: in_progress, views_so_far=${views_so_far}`);
     return { action: "in_progress", views_so_far };
   }
@@ -218,14 +237,21 @@ export async function processCycle(
   // not the latest snapshot, which could be days newer if this runs late (or as
   // a catch-up). Using the boundary keeps post-end-date views in the NEXT cycle.
   const boundaryByPlatform = new Map<string, number>();
+  const cappedBoundaryByPlatform = new Map<string, number>();
   for (const s of snaps ?? []) {
-    if (s.snapshot_date <= cycle.cycle_end_date && !boundaryByPlatform.has(s.platform)) {
-      boundaryByPlatform.set(s.platform, s.cumulative_views ?? 0);
+    if (s.snapshot_date <= cycle.cycle_end_date) {
+      if (!boundaryByPlatform.has(s.platform)) boundaryByPlatform.set(s.platform, s.cumulative_views ?? 0);
+      if (!cappedBoundaryByPlatform.has(s.platform)) cappedBoundaryByPlatform.set(s.platform, s.capped_cumulative_views ?? 0);
     }
   }
   const endViews = Array.from(boundaryByPlatform.values()).reduce((a, b) => a + b, 0);
+  const cappedEndViews = Array.from(cappedBoundaryByPlatform.values()).reduce((a, b) => a + b, 0);
+  // Track both the TRUE earned delta (stored for display) and the CAPPED delta
+  // (the payable basis the payout is computed from). Equal until a video crosses
+  // PER_VIDEO_VIEW_CAP; after that the payout caps while the display stays true.
   const viewsEarned = Math.max(0, endViews - (cycle.baseline_views ?? 0));
-  const viewBonus = parseFloat(((viewsEarned / 1000) * creator.rate_per_thousand_views).toFixed(2));
+  const cappedViewsEarned = Math.max(0, cappedEndViews - (cycle.baseline_capped_views ?? 0));
+  const viewBonus = parseFloat(((cappedViewsEarned / 1000) * creator.rate_per_thousand_views).toFixed(2));
   const baseFee = creator.base_fee ?? 0;
   const payoutAmount = parseFloat((baseFee + viewBonus).toFixed(2));
 
@@ -247,6 +273,7 @@ export async function processCycle(
         start_views: cycle.baseline_views ?? 0,
         end_views: endViews,
         views_earned: viewsEarned,
+        capped_views_earned: cappedViewsEarned,
         base_fee: baseFee,
         view_bonus: viewBonus,
         payout_amount: payoutAmount,
@@ -270,6 +297,7 @@ export async function processCycle(
     cycle_start_date: nextStart,
     cycle_end_date: nextEnd,
     baseline_views: endViews,
+    baseline_capped_views: cappedEndViews,
     updated_at: new Date().toISOString(),
   }).eq("creator_id", creator.id);
 
@@ -278,7 +306,7 @@ export async function processCycle(
     throw new Error(`creator_cycles roll failed: ${rollErr.message}`);
   }
 
-  console.log(`[cycle] rolled ${creator.id}: stamped ${cycle.cycle_start_date}→${cycle.cycle_end_date} ($${payoutAmount}, ${viewsEarned} views), new cycle ${nextStart}→${nextEnd} baseline=${endViews}`);
+  console.log(`[cycle] rolled ${creator.id}: stamped ${cycle.cycle_start_date}→${cycle.cycle_end_date} ($${payoutAmount}, ${viewsEarned} views / ${cappedViewsEarned} payable), new cycle ${nextStart}→${nextEnd} baseline=${endViews} cappedBaseline=${cappedEndViews}`);
   return {
     action: "rolled_over",
     stamped: {

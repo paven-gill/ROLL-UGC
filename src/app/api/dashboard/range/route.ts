@@ -75,12 +75,13 @@ export async function GET(req: Request) {
     creator_id: string;
     platform: string;
     cumulative_views: number | null;
+    capped_cumulative_views: number | null;
     post_count_30d: number | null;
     snapshot_date: string;
   }>((from, to) =>
     scopeToCreators(
       db.from("view_snapshots")
-        .select("creator_id, platform, cumulative_views, post_count_30d, snapshot_date")
+        .select("creator_id, platform, cumulative_views, capped_cumulative_views, post_count_30d, snapshot_date")
         .gte("snapshot_date", snapFetchLower)
         .lte("snapshot_date", endDate)
         .order("snapshot_date", { ascending: true })
@@ -120,7 +121,8 @@ export async function GET(req: Request) {
   }
 
   // Build per creator+platform ascending lists for nearest-prior lookups.
-  type Snap = { date: string; views: number; posts: number };
+  // `views` is the TRUE total (displayed); `capped` is the payable basis (payout).
+  type Snap = { date: string; views: number; capped: number; posts: number };
   const byCombo = new Map<string, Snap[]>();
   for (const s of snapshots || []) {
     const k = `${s.creator_id}|${s.platform}`;
@@ -128,6 +130,7 @@ export async function GET(req: Request) {
     byCombo.get(k)!.push({
       date: s.snapshot_date,
       views: s.cumulative_views ?? 0,
+      capped: s.capped_cumulative_views ?? 0,
       posts: s.post_count_30d ?? 0,
     });
   }
@@ -148,6 +151,8 @@ export async function GET(req: Request) {
 
   const results = creators.map(creator => {
     let ig_views = 0, tt_views = 0, ig_posts = 0, tt_posts = 0;
+    // Capped (payable) deltas, used for payout only — never displayed.
+    let capped_views = 0;
 
     for (const platform of ["instagram", "tiktok"] as const) {
       const combo = `${creator.id}|${platform}`;
@@ -163,9 +168,10 @@ export async function GET(req: Request) {
       if (!baselineSnap) windowAccurate = false;
       const baseline = baselineSnap ?? arr[0];
 
-      const views = baseline.date !== end.date
-        ? Math.max(0, end.views - baseline.views)
-        : 0;
+      const sameDay = baseline.date === end.date;
+      const views = sameDay ? 0 : Math.max(0, end.views - baseline.views);
+      const cappedDelta = sameDay ? 0 : Math.max(0, end.capped - baseline.capped);
+      capped_views += cappedDelta;
 
       if (platform === "instagram") {
         ig_views = views;
@@ -178,7 +184,8 @@ export async function GET(req: Request) {
 
     const total_views = ig_views + tt_views;
     const total_posts = ig_posts + tt_posts;
-    const payout = (total_views / 1000) * creator.rate_per_thousand_views;
+    // Payout is on capped views; total_views (true) stays the displayed figure.
+    const payout = (capped_views / 1000) * creator.rate_per_thousand_views;
 
     return {
       id: creator.id,

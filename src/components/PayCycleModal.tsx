@@ -15,6 +15,7 @@ export interface CycleForPay {
   start_views: number;
   end_views: number | null;
   views_earned: number;
+  capped_views_earned: number;
   base_fee: number;
   view_bonus: number;
   payout_amount: number;
@@ -75,6 +76,7 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
           start_views: cycle.start_views,
           end_views: cycle.end_views,
           views_earned: cycle.views_earned,
+          capped_views_earned: cycle.capped_views_earned,
           base_fee: cycle.base_fee,
           view_bonus: cycle.view_bonus,
           bonus_amount: bonus,
