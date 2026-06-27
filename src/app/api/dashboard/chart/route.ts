@@ -92,17 +92,19 @@ export async function GET(req: Request) {
     return r;
   };
 
-  const chartData = periods.map(({ prevMonthLastDay, lastDay, label }) => {
+  // Plot the RUNNING CUMULATIVE total of views gained since each creator's first
+  // snapshot — a monotonic growth curve whose latest point equals the TOTAL VIEWS
+  // card (Σ over creator+platform of latest − earliest). A per-month chart would
+  // only ever peak at the single biggest month, never the cumulative total the
+  // card shows. Baseline = each combo's earliest snapshot (the pre-tracking
+  // baseline the card also excludes), clamped once so it matches exactly.
+  const chartData = periods.map(({ lastDay, label }) => {
     let views = 0;
     for (const combo of comboList) {
+      const arr = byCombo.get(combo)!;
       const end = atOrBefore(combo, lastDay);
       if (!end) continue; // no snapshot in/before this month yet
-      // Baseline = cumulative as of end of previous month. Fall back to the
-      // creator's earliest snapshot when none exists (started mid-window) —
-      // mirrors the range card so the pre-tracking baseline isn't counted.
-      const baseline = atOrBefore(combo, prevMonthLastDay) ?? byCombo.get(combo)![0];
-      if (baseline.date === end.date) continue; // no movement within the month
-      views += Math.max(0, end.views - baseline.views);
+      views += Math.max(0, end.views - arr[0].views);
     }
     return { name: label, Views: views };
   });
