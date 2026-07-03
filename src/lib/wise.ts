@@ -215,6 +215,33 @@ function norm(s: string): string {
     .replace(/[^a-z0-9]/g, "");
 }
 
+// Split a name into normalised word tokens ("Sara Xu Yin" -> ["sara","xu","yin"]).
+function nameTokens(s: string): string[] {
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+// Does the creator name match the Wise recipient name? Two names match when the
+// smaller token set is fully contained in the larger — so "Sara Yin" matches
+// "Sara Xu Yin" (a middle name on the bank account) without a bare-substring
+// false positive. Falls back to the old squashed-substring check for names that
+// are written without spaces on one side.
+function nameMatches(creatorName: string, recipientName: string): boolean {
+  const ct = nameTokens(creatorName);
+  const rt = nameTokens(recipientName);
+  if (ct.length && rt.length) {
+    const [small, big] = ct.length <= rt.length ? [ct, rt] : [rt, ct];
+    if (small.every((t) => big.includes(t))) return true;
+  }
+  const cn = norm(creatorName);
+  const rn = norm(recipientName);
+  return cn.length > 0 && rn.length > 0 && (rn.includes(cn) || cn.includes(rn));
+}
+
 // Match one recorded payout against the real Wise activity feed.
 // Heuristic: recipient name ~ creator name AND amount ~ payout total.
 // Only individual outgoing TRANSFERs are matchable — batch "payouts" show a
@@ -224,14 +251,11 @@ export function matchPayout(
   payoutAmount: number,
   activities: WiseActivity[],
 ): PayoutMatch {
-  const cn = norm(creatorName);
   const amountClose = (v: number) => v > 0 && Math.abs(v - payoutAmount) <= Math.max(1, payoutAmount * 0.02);
 
   const candidates = activities.filter((a) => {
     if (a.incoming || a.type !== "TRANSFER") return false;
-    const rn = norm(a.name);
-    const nameOk = cn.length > 0 && rn.length > 0 && (rn.includes(cn) || cn.includes(rn));
-    return nameOk && amountClose(a.amount);
+    return nameMatches(creatorName, a.name) && amountClose(a.amount);
   });
   if (!candidates.length) return { status: "none", transferId: null, amount: null, currency: null, created: null };
 
