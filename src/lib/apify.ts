@@ -10,10 +10,53 @@ function rapidHeaders() {
   };
 }
 
+// Statuses worth retrying: 429 (rate limit) plus transient upstream 5xx.
+// Anything else (e.g. 404 for a deleted handle) is permanent — fail fast so we
+// don't burn attempts on a request that will never succeed.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const IG_MAX_ATTEMPTS = 5;
+
+// Back-off schedule with jitter. Honors a Retry-After header when the provider
+// sends one; otherwise exponential (0.5s, 1s, 2s, 4s, capped 8s) + a little
+// random spread so a fleet of concurrent scrapes doesn't all retry in lockstep.
+function igBackoffMs(attempt: number, retryAfterHeader: string | null): number {
+  const retryAfter = Number(retryAfterHeader);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
+  return Math.min(8000, 500 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 400);
+}
+
+// Rate-limit-aware GET. A 429 (or transient 5xx / network blip) becomes a short
+// wait-and-retry instead of a thrown error — so a creator whose scrape loses the
+// race against the provider's per-second limit recovers on its own rather than
+// being dropped for the night. Paired with the capped concurrency in the sync
+// fan-out (api/sync/route.ts), which keeps 429s rare in the first place.
 async function igGet(path: string) {
-  const res = await fetch(`${IG_BASE}${path}`, { headers: rapidHeaders() });
-  if (!res.ok) throw new Error(`RapidAPI ${path} → ${res.status} ${res.statusText}`);
-  return res.json();
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${IG_BASE}${path}`, { headers: rapidHeaders() });
+    } catch (err) {
+      // Network-level failure (connection reset, DNS blip) — retry like a 5xx.
+      if (attempt < IG_MAX_ATTEMPTS) {
+        const ms = igBackoffMs(attempt, null);
+        console.warn(`[rapidapi] ${path} → network error; retry ${attempt}/${IG_MAX_ATTEMPTS - 1} in ${ms}ms`);
+        await new Promise(r => setTimeout(r, ms));
+        continue;
+      }
+      throw err;
+    }
+
+    if (res.ok) return res.json();
+
+    if (RETRYABLE_STATUS.has(res.status) && attempt < IG_MAX_ATTEMPTS) {
+      const ms = igBackoffMs(attempt, res.headers.get("retry-after"));
+      console.warn(`[rapidapi] ${path} → ${res.status}; retry ${attempt}/${IG_MAX_ATTEMPTS - 1} in ${ms}ms`);
+      await new Promise(r => setTimeout(r, ms));
+      continue;
+    }
+
+    throw new Error(`RapidAPI ${path} → ${res.status} ${res.statusText}`);
+  }
 }
 
 function isWithinDays(ts: number | string, days: number): boolean {

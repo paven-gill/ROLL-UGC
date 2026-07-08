@@ -41,18 +41,28 @@ export async function GET(req: Request) {
 
   const today = businessDate();
 
-  // Active creators vs. who already has a snapshot filed today. A creator counts
-  // as "synced today" once they have at least one row (either platform) — enough
-  // to tell a whole-run miss (everyone at zero) from a healthy day.
+  // Active creators + which (creator, platform) snapshots already landed today.
+  // A creator is only "done" once EVERY platform they have a handle for has a
+  // snapshot today — checked per-platform, not "at least one row somewhere".
   const [creatorsRes, todaysRes] = await Promise.all([
-    db.from("creators").select("id").eq("active", true),
-    db.from("view_snapshots").select("creator_id").eq("snapshot_date", today),
+    db.from("creators").select("id, instagram_username, tiktok_username").eq("active", true),
+    db.from("view_snapshots").select("creator_id, platform").eq("snapshot_date", today),
   ]);
   if (creatorsRes.error) {
     return NextResponse.json({ error: creatorsRes.error.message }, { status: 500 });
   }
-  const have = new Set((todaysRes.data ?? []).map(r => r.creator_id));
-  const missing = (creatorsRes.data ?? []).filter(c => !have.has(c.id)).length;
+  const haveToday = new Set(
+    (todaysRes.data ?? []).map(r => `${r.creator_id}:${r.platform}`)
+  );
+  // The fix: a creator with fresh TikTok but a rate-limited (stale) Instagram
+  // used to count as "synced" and get skipped by the safety net, so the stale
+  // number could sit for days. Now per-platform staleness triggers a heal too —
+  // not just a whole-run miss (which still shows up here as everyone incomplete).
+  const missing = (creatorsRes.data ?? []).filter(c => {
+    const needsIg = !!c.instagram_username && !haveToday.has(`${c.id}:instagram`);
+    const needsTt = !!c.tiktok_username && !haveToday.has(`${c.id}:tiktok`);
+    return needsIg || needsTt;
+  }).length;
 
   if (missing === 0) {
     return NextResponse.json({ action: "noop", today, missing: 0 });

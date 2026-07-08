@@ -126,20 +126,30 @@ export async function GET(req: Request) {
   }
 
   // ── Phase 2: fan out Instagram (+ cycle check) per creator ─────────────────
-  // We stagger the *launches* by 250ms to avoid a thundering herd on the upstream
-  // APIs, but we do NOT wait for one to finish before launching the next — they
-  // all run concurrently. Promise.allSettled waits for the whole batch.
-  const settled = await Promise.allSettled(
-    list.map(async (creator, i) => {
-      await sleep(i * 250);
-      return triggerCreatorSync(baseUrl, creator);
-    })
-  );
+  // Instagram is per-creator (RapidAPI, billed per request), but we cap how many
+  // run AT ONCE so the burst of RapidAPI requests stays under the provider's
+  // rate limit. This is the self-scaling version of "spread them out": add more
+  // creators and the run just takes a little longer — it never floods the API
+  // and trips a 429. Paired with igGet's retry/backoff (lib/apify.ts), any
+  // creator that still gets rate-limited waits and recovers instead of being
+  // silently dropped for the night (which left stale Instagram numbers before).
+  // Tune with IG_SYNC_CONCURRENCY. Default 8 was picked empirically against the
+  // full roster: it finished in ~150s (vs ~240s at 4) with ZERO rate-limits,
+  // while a stress run at 21 was where 429s kicked in — so 8 has real headroom.
+  const IG_CONCURRENCY = Math.max(1, Number(process.env.IG_SYNC_CONCURRENCY) || 8);
 
-  const results = settled.map((s, i) =>
-    s.status === "fulfilled"
-      ? s.value
-      : { status: "error", name: list[i]?.name, error: String(s.reason) }
+  const results: Record<string, unknown>[] = new Array(list.length);
+  let cursor = 0;
+  const worker = async () => {
+    let i: number;
+    // triggerCreatorSync never throws (it catches + returns an error object), so
+    // one creator failing can't starve the pool.
+    while ((i = cursor++) < list.length) {
+      results[i] = await triggerCreatorSync(baseUrl, list[i]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(IG_CONCURRENCY, list.length) }, () => worker())
   );
 
   // Run thumbnail cleanup once, after the per-creator children have written.
