@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { Creator, MonthlyMetrics } from "@/types";
 import { apiFetch } from "@/lib/api";
+import { applyCycleViewCap } from "@/lib/constants";
 
 interface CreatorDetail extends Creator {
   metrics: MonthlyMetrics[];
@@ -43,6 +44,7 @@ interface CycleData {
   activeCycle: ActiveCycle | null;
   cycleHistory: CycleHistoryRow[];
   lastSyncedAt: string | null;
+  monthlyViewCap: number | null;
 }
 
 interface PostRow {
@@ -420,9 +422,10 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const stampedTotal = (cycleData?.cycleHistory ?? [])
     .filter(c => c.status === "paid" || c.status === "pending")
     .reduce((sum, c) => sum + (c.payout_amount ?? 0), 0);
+  const viewCap = cycleData?.monthlyViewCap ?? null;
   const activeCycleRow = (cycleData?.cycleHistory ?? []).find(c => c.status === "in_progress");
   const currentCycleBonus = activeCycleRow
-    ? (activeCycleRow.views_earned_capped / 1000) * (creator.rate_per_thousand_views ?? 0)
+    ? (applyCycleViewCap(activeCycleRow.views_earned_capped, viewCap) / 1000) * (creator.rate_per_thousand_views ?? 0)
     : 0;
   const totalPaidOut = stampedTotal + currentCycleBonus;
   const monthly_target = creator.monthly_target ?? 30;
@@ -691,7 +694,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
               {/* Active cycle details */}
               {cycleData?.activeCycle && (() => {
                 const ac = cycleData.activeCycle!;
-                const projectedPayout = (ac.views_earned_capped / 1000) * creator.rate_per_thousand_views;
+                const projectedPayout = (applyCycleViewCap(ac.views_earned_capped, viewCap) / 1000) * creator.rate_per_thousand_views;
                 return (
                   <>
                     <div className="border-t border-white/[0.07] pt-4">
@@ -783,7 +786,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                           <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
                             <p className="text-gray-500 text-xs mb-1">View Bonus</p>
                             <p className="text-white text-sm font-semibold">
-                              ${((ac.views_earned_capped / 1000) * creator.rate_per_thousand_views).toFixed(2)}
+                              ${((applyCycleViewCap(ac.views_earned_capped, viewCap) / 1000) * creator.rate_per_thousand_views).toFixed(2)}
                             </p>
                           </div>
                           <div className="bg-white/[0.03] border border-white/[0.05] rounded-lg p-3">
@@ -877,7 +880,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                       {c.id === "active" && cycleData.activeCycle?.not_started
                         ? <span className="text-gray-600">—</span>
                         : c.status === "in_progress"
-                        ? `$${((c.views_earned_capped / 1000) * creator.rate_per_thousand_views).toFixed(2)}`
+                        ? `$${((applyCycleViewCap(c.views_earned_capped, viewCap) / 1000) * creator.rate_per_thousand_views).toFixed(2)}`
                         : c.payout_amount != null ? `$${c.payout_amount.toFixed(2)}` : <span className="text-gray-600">—</span>
                       }
                     </td>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
+import { getCampaignViewCap } from "@/lib/campaign-caps";
 
 // GET /api/creators/[id]/cycles
 // Returns active cycle state + completed cycle history for a creator.
@@ -20,6 +21,7 @@ export async function GET(
     { data: completedCycles },
     { data: latestSnaps },
     { data: allPosts },
+    { data: creatorRow },
   ] = await Promise.all([
     db.from("creator_cycles")
       .select("creator_id, cycle_start_date, cycle_end_date, baseline_views, baseline_capped_views")
@@ -36,7 +38,15 @@ export async function GET(
     db.from("post_snapshots")
       .select("taken_at")
       .eq("creator_id", creatorId),
+    db.from("creators")
+      .select("campaign_id")
+      .eq("id", creatorId)
+      .single(),
   ]);
+
+  // Per-campaign hard cap on payable views per cycle (null = uncapped). Returned
+  // so the client applies the same ceiling to its projected-payout figures.
+  const monthlyViewCap = await getCampaignViewCap(db, creatorRow?.campaign_id ?? null);
 
   const lastSyncedAt = latestSnaps?.[0]?.synced_at ?? null;
   console.log(`[cycles] creator=${creatorId} activeCycleRow=`, activeCycleRow, `completedCycles=`, completedCycles?.length ?? 0);
@@ -126,7 +136,7 @@ export async function GET(
       ]
     : completedRows;
 
-  return NextResponse.json({ activeCycle, cycleHistory, lastSyncedAt });
+  return NextResponse.json({ activeCycle, cycleHistory, lastSyncedAt, monthlyViewCap });
   } catch (e) {
     if (isAuthError(e)) return e.response;
     throw e;
