@@ -6,6 +6,7 @@ import {
   scopeToCreators,
   isAuthError,
 } from "@/lib/auth";
+import { loadCampaignViewCaps } from "@/lib/campaign-caps";
 
 export async function GET(req: Request) {
   try {
@@ -32,6 +33,10 @@ export async function GET(req: Request) {
   ]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Per-campaign payout view cap (null = uncapped) so the client can clamp the
+  // current-cycle bonus in lifetime totals the same way the payout paths do.
+  const viewCaps = await loadCampaignViewCaps(db);
 
   const metricsByCreator = new Map<string, typeof metrics>();
   for (const m of metrics ?? []) {
@@ -97,6 +102,7 @@ export async function GET(req: Request) {
       // True delta for display; capped delta for the in-progress payout estimate.
       current_cycle_views: Math.max(0, latestTotal - baseline),
       current_cycle_capped_views: Math.max(0, latestCappedTotal - cappedBaseline),
+      monthly_view_cap: viewCaps.get(c.campaign_id) ?? null,
       tracked_post_count: postCountByCreator.get(c.id) ?? 0,
     };
   });

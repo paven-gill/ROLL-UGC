@@ -20,6 +20,7 @@ import PayCycleModal, { type CycleForPay } from "@/components/PayCycleModal";
 import type { Creator, MonthlyMetrics } from "@/types";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { applyCycleViewCap } from "@/lib/constants";
 
 type Tab = "home" | "creators" | "payouts" | "finance";
 type TimeRangeType = "7d" | "14d" | "30d" | "month" | "all";
@@ -30,6 +31,7 @@ interface CreatorRow extends Creator {
   completed_views_total: number;
   current_cycle_views: number;
   current_cycle_capped_views: number;
+  monthly_view_cap: number | null;
   tracked_post_count: number;
 }
 
@@ -123,10 +125,14 @@ function getAllTimeSummary(creator: CreatorRow) {
   const allViews = (creator.completed_views_total ?? 0) + (creator.current_cycle_views ?? 0);
 
   // Total paid = completed cycle payouts + view bonus for the current in-progress
-  // cycle. The bonus is on the CAPPED (payable) current-cycle views, so payments
-  // cap per video even while allViews above stays true.
-  const totalPayout = (creator.completed_payout_total ?? 0)
-    + ((creator.current_cycle_capped_views ?? 0) / 1000) * creator.rate_per_thousand_views;
+  // cycle. The bonus is on the CAPPED (payable) current-cycle views, clamped by
+  // the campaign's per-cycle payout ceiling (e.g. Roll's 1M), so payments cap even
+  // while allViews above stays true. Completed cycles are already capped in their
+  // stored payout_amount, so only the current cycle needs clamping here.
+  const currentCycleBonus =
+    (applyCycleViewCap(creator.current_cycle_capped_views ?? 0, creator.monthly_view_cap ?? null) / 1000)
+    * creator.rate_per_thousand_views;
+  const totalPayout = (creator.completed_payout_total ?? 0) + currentCycleBonus;
   return { allViews, allPosts, totalPayout };
 }
 
