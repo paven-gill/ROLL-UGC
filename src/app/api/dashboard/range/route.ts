@@ -185,6 +185,13 @@ export async function GET(req: Request) {
     const total_views = ig_views + tt_views;
     const total_posts = ig_posts + tt_posts;
     // Payout is on capped views; total_views (true) stays the displayed figure.
+    // NOTE: the per-campaign payout ceiling (campaigns.monthly_view_cap) is applied
+    // per CYCLE, at the authoritative payout paths (cycle close + the Payouts-page
+    // estimate). It is intentionally NOT applied here: this window is arbitrary
+    // (7/14/30d, a month, or all-time) and can span multiple cycles, so a single
+    // min(capped, cap) would wrongly cap multi-cycle earnings. This Home figure is
+    // a live estimate of view value, not the money owed — the Payouts/Finance pages
+    // are the source of truth for capped amounts actually paid.
     const payout = (capped_views / 1000) * creator.rate_per_thousand_views;
 
     return {

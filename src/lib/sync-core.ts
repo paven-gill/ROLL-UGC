@@ -2,7 +2,8 @@ import { createServerClient } from "@/lib/supabase";
 import { type ScrapedData } from "@/lib/apify";
 import { uploadTopTikTokThumbs } from "@/lib/thumbnail-storage";
 import { businessDate } from "@/lib/date";
-import { PER_VIDEO_VIEW_CAP } from "@/lib/constants";
+import { PER_VIDEO_VIEW_CAP, applyCycleViewCap } from "@/lib/constants";
+import { getCampaignViewCap } from "@/lib/campaign-caps";
 
 // ─── Where self-calls (cron fan-out + catch-up) should point ─────────────────
 // MUST be the STABLE production domain, never the per-deployment VERCEL_URL —
@@ -158,6 +159,7 @@ export async function processCycle(
     joined_at: string | null;
     base_fee: number;
     rate_per_thousand_views: number;
+    campaign_id?: string | null;
     active?: boolean;
     status?: "active" | "paused" | "finished" | null;
   }
@@ -251,7 +253,12 @@ export async function processCycle(
   // PER_VIDEO_VIEW_CAP; after that the payout caps while the display stays true.
   const viewsEarned = Math.max(0, endViews - (cycle.baseline_views ?? 0));
   const cappedViewsEarned = Math.max(0, cappedEndViews - (cycle.baseline_capped_views ?? 0));
-  const viewBonus = parseFloat(((cappedViewsEarned / 1000) * creator.rate_per_thousand_views).toFixed(2));
+  // Hard payout ceiling: the campaign may cap combined payable views per cycle
+  // (e.g. Roll caps at 1,000,000). capped_views_earned is stored uncapped (the
+  // true combined total); only the payout basis is clamped.
+  const cap = await getCampaignViewCap(db, creator.campaign_id);
+  const payableViewsEarned = applyCycleViewCap(cappedViewsEarned, cap);
+  const viewBonus = parseFloat(((payableViewsEarned / 1000) * creator.rate_per_thousand_views).toFixed(2));
   const baseFee = creator.base_fee ?? 0;
   const payoutAmount = parseFloat((baseFee + viewBonus).toFixed(2));
 

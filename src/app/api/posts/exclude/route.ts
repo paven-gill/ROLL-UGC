@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { requireAuth, assertCreatorInScope, isAuthError } from "@/lib/auth";
-import { PER_VIDEO_VIEW_CAP } from "@/lib/constants";
+import { PER_VIDEO_VIEW_CAP, applyCycleViewCap } from "@/lib/constants";
+import { getCampaignViewCap } from "@/lib/campaign-caps";
 
 export async function POST(req: Request) {
   try {
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
 
   // 3. Fetch creator rate + active cycle in parallel
   const [creatorRes, activeCycleRes, snapsRes] = await Promise.all([
-    db.from("creators").select("rate_per_thousand_views").eq("id", creator_id).single(),
+    db.from("creators").select("rate_per_thousand_views, campaign_id").eq("id", creator_id).single(),
     db.from("creator_cycles").select("cycle_start_date, baseline_views, baseline_capped_views").eq("creator_id", creator_id).single(),
     db.from("view_snapshots")
       .select("snapshot_date, cumulative_views, capped_cumulative_views")
@@ -65,6 +66,7 @@ export async function POST(req: Request) {
   ]);
 
   const rate = creatorRes.data?.rate_per_thousand_views ?? 2;
+  const viewCap = await getCampaignViewCap(db, creatorRes.data?.campaign_id ?? null);
   const activeCycle = activeCycleRes.data;
 
   // 4. Subtract view count from all daily snapshots on/after taken_at — the true
@@ -138,7 +140,10 @@ export async function POST(req: Request) {
       // Reducing the earned delta by the clamped contribution is equivalent to
       // recomputing (end_capped − start_capped) with end_capped lowered.
       const newCappedEarned = Math.max(0, (cycle.capped_views_earned ?? 0) - cappedViewCount);
-      const newViewBonus = parseFloat(((newCappedEarned / 1000) * rate).toFixed(2));
+      // Re-apply the campaign payout ceiling: if the (still true) capped total is
+      // above the cap, excluding a post below that surplus leaves the payout at the
+      // cap. capped_views_earned itself stays the true combined total.
+      const newViewBonus = parseFloat(((applyCycleViewCap(newCappedEarned, viewCap) / 1000) * rate).toFixed(2));
       const newPayout = parseFloat((cycle.base_fee + newViewBonus).toFixed(2));
       return db.from("payout_cycles").update({
         end_views: newEndViews,

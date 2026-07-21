@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { requireAuth, allowedCreatorIds, isAuthError } from "@/lib/auth";
 import { fetchAllRows } from "@/lib/fetch-all";
+import { loadCampaignViewCaps } from "@/lib/campaign-caps";
+import { applyCycleViewCap } from "@/lib/constants";
 
 // GET /api/dashboard/cycles?year=2026&month=5
 //
@@ -37,7 +39,7 @@ export async function GET(req: Request) {
     .order("cycle_end_date");
   // Active cycles ending in this month (for in-progress estimates)
   const activeQ = db.from("creator_cycles")
-    .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, active, status, monthly_target)")
+    .select("*, creators(id, name, instagram_username, tiktok_username, base_fee, rate_per_thousand_views, campaign_id, active, status, monthly_target)")
     .gte("cycle_end_date", firstDay)
     .lt("cycle_end_date", nextFirstDay);
   // Every creator's current active-cycle start (any month) — used to drop superseded
@@ -63,7 +65,8 @@ export async function GET(req: Request) {
     { data: activeCycles },
     { data: activeStarts },
     { data: latestSnaps },
-  ] = await Promise.all([completedQ, activeQ, activeStartsQ, snapsQ]);
+    viewCaps,
+  ] = await Promise.all([completedQ, activeQ, activeStartsQ, snapsQ, loadCampaignViewCaps(db)]);
 
   // A stamped payout whose start matches the creator's CURRENT active-cycle start is a
   // superseded leftover: the cycle was stamped on completion, then its dates were edited
@@ -123,7 +126,7 @@ export async function GET(req: Request) {
     .flatMap(cycle => {
       const cr = cycle.creators as {
         name: string; instagram_username: string | null; tiktok_username: string | null;
-        base_fee: number; rate_per_thousand_views: number;
+        base_fee: number; rate_per_thousand_views: number; campaign_id: string | null;
         active: boolean | null; status: "active" | "paused" | "finished" | null;
         monthly_target: number | null;
       } | null;
@@ -137,7 +140,9 @@ export async function GET(req: Request) {
       // Displayed views earned use the true series; the payout uses the capped one.
       const views_so_far = Math.max(0, latestViews(cycle.creator_id, false) - (cycle.baseline_views ?? 0));
       const capped_so_far = Math.max(0, latestViews(cycle.creator_id, true) - (cycle.baseline_capped_views ?? 0));
-      const view_bonus = parseFloat(((capped_so_far / 1000) * cr.rate_per_thousand_views).toFixed(2));
+      // Apply the campaign's per-cycle payout ceiling (e.g. Roll caps at 1M views).
+      const payable_so_far = applyCycleViewCap(capped_so_far, viewCaps.get(cr.campaign_id ?? "") ?? null);
+      const view_bonus = parseFloat(((payable_so_far / 1000) * cr.rate_per_thousand_views).toFixed(2));
       const payout_amount = parseFloat((cr.base_fee + view_bonus).toFixed(2));
 
       return [{
