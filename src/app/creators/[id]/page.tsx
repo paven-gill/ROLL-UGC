@@ -396,8 +396,8 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
         const parts: string[] = [];
         if (data.instagram) parts.push(`IG ${fmt(data.instagram.cumulative_views ?? 0)} views`);
         if (data.tiktok)    parts.push(`TT ${fmt(data.tiktok.cumulative_views ?? 0)} views`);
-        if (data.instagram_error) parts.push(`IG error`);
-        if (data.tiktok_error)    parts.push(`TT error`);
+        if (data.instagram_error) parts.push(`IG error: ${data.instagram_error}`);
+        if (data.tiktok_error)    parts.push(`TT error: ${data.tiktok_error}`);
         setSyncMsg(`${parts.join(" · ")} · cycle: ${data.cycle?.action ?? "unknown"}`);
       }
     } catch (e) {
