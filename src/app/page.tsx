@@ -7,7 +7,7 @@ import {
   RefreshCw, Plus, Instagram, Music2,
   Eye, FileVideo, TrendingUp, ChevronRight, ChevronDown, CalendarDays,
   ArrowUpDown, Pencil, Heart, MessageCircle, CheckCircle2, Clock,
-  Wallet, Building2, Download, Search, X,
+  Wallet, Building2, Download, Search, X, AlertTriangle, ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -398,6 +398,107 @@ function CreatorPicker({
   );
 }
 
+// ─── Tracking health ──────────────────────────────────────────────────────────
+// Small header button that flags creators whose view tracking has silently
+// frozen (a platform with no fresh snapshot). Green when everything's current;
+// amber with a count when something's stale. Click to see who + jump to them.
+
+interface TrackingIssue {
+  creator_id: string;
+  creator_name: string;
+  platform: "instagram" | "tiktok";
+  handle: string;
+  last_snapshot: string | null;
+  days_stale: number | null;
+}
+
+function TrackingHealthButton() {
+  const router = useRouter();
+  const [issues, setIssues] = useState<TrackingIssue[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    apiFetch("/api/dashboard/tracking-health")
+      .then(r => r.json())
+      .then(d => setIssues(Array.isArray(d.issues) ? d.issues : []))
+      .catch(() => setIssues([]))
+      .finally(() => setLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  const count = issues.length;
+  const healthy = loaded && count === 0;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={healthy ? "All creators tracking normally" : `${count} tracking issue${count === 1 ? "" : "s"}`}
+        className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors border ${
+          count > 0
+            ? "bg-amber-500/15 text-amber-400 border-amber-500/40 shadow-[0_0_10px_rgba(251,191,36,0.15)]"
+            : "bg-white/[0.05] text-gray-600 border-white/[0.1] hover:text-gray-300 hover:border-white/[0.13]"
+        }`}
+      >
+        {count > 0 ? <AlertTriangle size={14} /> : <ShieldCheck size={14} />}
+        {count > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-[10px] font-bold text-black flex items-center justify-center">
+            {count}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 bg-[#0b0b12]/95 backdrop-blur-2xl border border-white/[0.08] rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] z-50 w-72 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/[0.06] flex items-center gap-2">
+            {healthy
+              ? <ShieldCheck size={13} className="text-emerald-400" />
+              : <AlertTriangle size={13} className="text-amber-400" />}
+            <span className="text-xs font-medium text-gray-300">
+              {!loaded ? "Checking tracking…" : healthy ? "All tracking up to date" : `${count} tracking issue${count === 1 ? "" : "s"}`}
+            </span>
+          </div>
+          {count > 0 && (
+            <div className="max-h-72 overflow-y-auto p-1">
+              {issues.map(i => (
+                <button
+                  key={`${i.creator_id}-${i.platform}`}
+                  onClick={() => { setOpen(false); router.push(`/creators/${i.creator_id}`); }}
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/[0.05] transition-colors flex items-center gap-2.5"
+                >
+                  {i.platform === "instagram"
+                    ? <Instagram size={14} className="text-blue-400 shrink-0" />
+                    : <Music2 size={14} className="text-pink-400 shrink-0" />}
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-gray-200 truncate">{i.creator_name}</span>
+                    <span className="block text-[11px] text-gray-500 truncate">
+                      {i.platform === "instagram" ? "Instagram" : "TikTok"} · @{i.handle}
+                    </span>
+                  </span>
+                  <span className="text-[11px] text-amber-400 shrink-0 whitespace-nowrap">
+                    {i.days_stale == null ? "no data" : `${i.days_stale}d stale`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="px-3 py-1.5 border-t border-white/[0.06] text-[10px] text-gray-600">
+            Flags active creators with no snapshot in 2+ days.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Post grid ────────────────────────────────────────────────────────────────
 
 // Thumbnail: native lazy-load (browser fetches ~a screen ahead, so normal
@@ -718,6 +819,7 @@ function HomeTab({ creators, onNavigate }: { creators: CreatorRow[]; onNavigate:
            `${MONTHS[selMonth - 1]} ${selYear}`}
         </p>
         <div className="flex items-center gap-2">
+          <TrackingHealthButton />
           <button
             onClick={() => setPlatformFilter(p => p === "instagram" ? "all" : "instagram")}
             title="Instagram only"
