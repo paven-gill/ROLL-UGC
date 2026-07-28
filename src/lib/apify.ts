@@ -188,14 +188,50 @@ async function fetchFeedForViewCounts(
 }
 
 export async function scrapeInstagram(username: string, joinedAt?: string | null): Promise<ScrapedData> {
-  // Step 1: get user ID + follower count
-  const profile = await igGet(`/profile?username=${username}`);
+  // Step 1: resolve user ID + follower count.
+  //
+  // The primary /profile endpoint can wedge on a SINGLE public profile — a
+  // persistent 500 for one creator while it serves everyone else fine (observed
+  // 2026-07 for two accounts, unchanged handles that had tracked for weeks). When
+  // that happens, fall back to the lightweight /id lookup (and then /web_profile_info)
+  // to resolve the user id a different way, so one stuck endpoint doesn't freeze a
+  // creator indefinitely. The happy path (profile call succeeds) is unchanged.
+  let userId: string | number | undefined;
+  let follower_count = 0;
 
-  const userId = profile.pk || profile.id || profile.user_id;
-  const follower_count =
-    (profile.edge_followed_by as { count: number })?.count ||
-    profile.follower_count ||
-    profile.followersCount || 0;
+  const readProfile = (profile: Record<string, unknown>) => {
+    userId = (profile.pk || profile.id || profile.user_id) as string | number | undefined;
+    follower_count =
+      ((profile.edge_followed_by as { count: number })?.count as number) ||
+      (profile.follower_count as number) ||
+      (profile.followersCount as number) || 0;
+  };
+
+  try {
+    readProfile(await igGet(`/profile?username=${username}`));
+  } catch (profileErr) {
+    console.warn(`[rapidapi] /profile failed for @${username}: ${profileErr}. Trying fallbacks…`);
+    // Fallback A: /id?username= → { id } (lightweight username→id resolver).
+    try {
+      const idResp = await igGet(`/id?username=${username}`);
+      userId = (idResp.id || idResp.user_id || idResp.pk) as string | number | undefined;
+    } catch (idErr) {
+      console.warn(`[rapidapi] /id fallback failed for @${username}: ${idErr}`);
+    }
+    // Fallback B: /web_profile_info?username= → { data: { user: { ... } } }.
+    if (!userId) {
+      try {
+        const web = await igGet(`/web_profile_info?username=${username}`);
+        const user = ((web.data as Record<string, unknown>)?.user ?? web.user) as Record<string, unknown> | undefined;
+        if (user) readProfile(user);
+      } catch (webErr) {
+        console.warn(`[rapidapi] /web_profile_info fallback failed for @${username}: ${webErr}`);
+      }
+    }
+    // Every resolver failed → surface the ORIGINAL /profile error (the meaningful one).
+    if (!userId) throw profileErr;
+    console.log(`[rapidapi] resolved @${username} via fallback → userId: ${userId}`);
+  }
 
   if (!userId) throw new Error(`Could not find user ID for @${username}`);
   console.log(`[rapidapi] @${username} → userId: ${userId}, followers: ${follower_count}`);
