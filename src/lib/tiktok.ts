@@ -4,12 +4,13 @@
 // scrapeTikTok / scrapeTikTokBatch from HERE (not from a provider module), so
 // flipping the provider is one env var with zero code changes:
 //
-//   TIKTOK_SCRAPER=scraptik   → ScrapTik (RapidAPI)     [default]
-//   TIKTOK_SCRAPER=tikwm       → tikwm / tiktok-scraper7 (RapidAPI, cheap/free)
+//   TIKTOK_SCRAPER=tikwm       → tikwm / tiktok-scraper7 (RapidAPI, free)  [default]
+//   TIKTOK_SCRAPER=scraptik   → ScrapTik (RapidAPI)     [cancelled — will 403]
 //   TIKTOK_SCRAPER=apify       → Apify (legacy)          [emergency escape hatch]
 //
-// Unset/typo falls through to ScrapTik (no silent change). All three return the
-// identical ScrapedData shape, so nothing downstream cares which one runs.
+// Default is tikwm: ScrapTik's paid subscription was cancelled (2026-08), so it
+// now 403s and must NOT be the fallback. Unset/typo → tikwm. All providers return
+// the identical ScrapedData shape, so nothing downstream cares which one runs.
 
 import {
   scrapeTikTok as scrapeTikTokApify,
@@ -25,10 +26,10 @@ export type { TikTokTarget, ScrapedData };
 type Provider = "scraptik" | "tikwm" | "apify";
 
 function provider(): Provider {
-  const v = (process.env.TIKTOK_SCRAPER ?? "scraptik").trim().toLowerCase();
-  if (v === "tikwm") return "tikwm";
+  const v = (process.env.TIKTOK_SCRAPER ?? "tikwm").trim().toLowerCase();
+  if (v === "scraptik") return "scraptik";
   if (v === "apify") return "apify";
-  return "scraptik"; // default / unset / typo
+  return "tikwm"; // default / unset / typo — ScrapTik is cancelled, never fall back to it
 }
 
 export function scrapeTikTok(username: string, joinedAt?: string | null): Promise<ScrapedData> {
