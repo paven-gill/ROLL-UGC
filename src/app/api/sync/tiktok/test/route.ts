@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { scrapeTikTok as scrapeApify } from "@/lib/apify";
 import { scrapeTikTokScraptik } from "@/lib/scraptik";
+import { scrapeTikTokTikwm } from "@/lib/tikwm";
 
 export const maxDuration = 300;
 
@@ -41,6 +42,19 @@ export async function GET(req: Request) {
     };
   } catch (e) {
     out.scraptik_error = String(e);
+  }
+
+  try {
+    const t = await scrapeTikTokTikwm(username);
+    out.tikwm = {
+      cumulative_views: t.cumulative_views,
+      posts_last_30_days: t.posts_last_30_days,
+      follower_count: t.follower_count,
+      post_count: t.posts.length,
+      sample_posts: t.posts.slice(0, 3),
+    };
+  } catch (e) {
+    out.tikwm_error = String(e);
   }
 
   if (compare) {
