@@ -7,15 +7,15 @@ import { businessDayOfMonth } from "@/lib/date";
 export const maxDuration = 300;
 
 // ─── TikTok scrape cadence ────────────────────────────────────────────────────
-// Both platforms now sync EVERY night. TikTok used to be throttled to every Nth
-// day because the legacy Apify scraper was pay-per-result; ScrapTik (the current
-// default) is a flat-quota RapidAPI plan with plenty of headroom, so there's no
-// cost reason to skip nights anymore — daily keeps payout cycles fully fresh.
+// TikTok syncs FORTNIGHTLY by default. TikTok is ~1.6% of total views, and the
+// current provider (tikwm, a free RapidAPI tier ~300 req/mo) can't sustain daily
+// scraping of every creator. Fortnightly (~2–3 runs/mo × ~30 calls) stays well
+// under that quota with headroom to spare, and a payout's TikTok number being at
+// most ~2 weeks stale is pennies. Instagram still syncs every night.
 //
-// The every-Nth-day gate is kept only as a retune knob: set TIKTOK_SYNC_EVERY_DAYS
-// to >1 to anchor TikTok to the day-of-month again (runs on the 1st, 1+N, …).
-// Default 1 = run every night.
-const TIKTOK_SYNC_EVERY_DAYS = Number(process.env.TIKTOK_SYNC_EVERY_DAYS) || 1;
+// Retune knob: set TIKTOK_SYNC_EVERY_DAYS to change the cadence without a deploy
+// (runs on the 1st, 1+N, …); 1 = every night. The env var overrides this default.
+const TIKTOK_SYNC_EVERY_DAYS = Number(process.env.TIKTOK_SYNC_EVERY_DAYS) || 14;
 
 function isTikTokSyncDay(): boolean {
   // N<=1 means run every night. (Guard: `x % 1` is always 0, so without this a
