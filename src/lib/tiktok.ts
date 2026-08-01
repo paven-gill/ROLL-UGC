@@ -27,9 +27,14 @@ type Provider = "scraptik" | "tikwm" | "apify";
 
 function provider(): Provider {
   const v = (process.env.TIKTOK_SCRAPER ?? "tikwm").trim().toLowerCase();
-  if (v === "scraptik") return "scraptik";
   if (v === "apify") return "apify";
-  return "tikwm"; // default / unset / typo — ScrapTik is cancelled, never fall back to it
+  // ScrapTik is DECOMMISSIONED — its subscription was cancelled (2026-08) and it
+  // now 403s. Ignore any lingering TIKTOK_SCRAPER=scraptik (a stale prod env var
+  // was still forcing ScrapTik after the switch) and route everything else to tikwm.
+  if (v === "scraptik") {
+    console.warn("[tiktok] TIKTOK_SCRAPER=scraptik ignored — ScrapTik decommissioned; using tikwm");
+  }
+  return "tikwm";
 }
 
 export function scrapeTikTok(username: string, joinedAt?: string | null): Promise<ScrapedData> {
