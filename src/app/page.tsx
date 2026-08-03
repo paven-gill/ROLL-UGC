@@ -412,9 +412,16 @@ interface TrackingIssue {
   days_stale: number | null;
 }
 
+interface TikTokSchedule {
+  cadence_days: number;
+  last_synced: string | null;
+  next_sync_in_days: number | null;
+}
+
 function TrackingHealthButton() {
   const router = useRouter();
   const [issues, setIssues] = useState<TrackingIssue[]>([]);
+  const [schedule, setSchedule] = useState<TikTokSchedule | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -422,8 +429,11 @@ function TrackingHealthButton() {
   useEffect(() => {
     apiFetch("/api/dashboard/tracking-health")
       .then(r => r.json())
-      .then(d => setIssues(Array.isArray(d.issues) ? d.issues : []))
-      .catch(() => setIssues([]))
+      .then(d => {
+        setIssues(Array.isArray(d.issues) ? d.issues : []);
+        setSchedule(d.tiktok_schedule ?? null);
+      })
+      .catch(() => { setIssues([]); setSchedule(null); })
       .finally(() => setLoaded(true));
   }, []);
 
@@ -490,8 +500,22 @@ function TrackingHealthButton() {
               ))}
             </div>
           )}
+          {/* TikTok is fortnightly by design — show its schedule as a calm status,
+              never an amber warning, while it's on-cadence. */}
+          {schedule && schedule.next_sync_in_days != null && (
+            <div className="px-3 py-2 border-t border-white/[0.06] flex items-center gap-2.5">
+              <Music2 size={14} className="text-pink-400 shrink-0" />
+              <span className="flex-1 min-w-0 text-[11px] text-gray-400">
+                TikTok syncs every {schedule.cadence_days}d
+                {schedule.last_synced ? ` · last ${schedule.last_synced}` : ""}
+              </span>
+              <span className="text-[11px] text-gray-400 shrink-0 whitespace-nowrap">
+                {schedule.next_sync_in_days === 0 ? "sync due today" : `next in ${schedule.next_sync_in_days}d`}
+              </span>
+            </div>
+          )}
           <div className="px-3 py-1.5 border-t border-white/[0.06] text-[10px] text-gray-600">
-            Flags active creators with no snapshot in 2+ days.
+            Flags Instagram with no snapshot in 2+ days; TikTok only when overdue past its {schedule?.cadence_days ?? 14}-day cadence.
           </div>
         </div>
       )}

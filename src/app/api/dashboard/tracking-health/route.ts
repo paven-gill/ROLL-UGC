@@ -12,7 +12,22 @@ import { businessDate, addDays } from "@/lib/date";
 // STALE_DAYS. Only ACTIVE creators are checked (paused/finished are expected to
 // stop), and only for platforms they actually have a handle for.
 
-const STALE_DAYS = 2; // healthy = synced today or yesterday; 2+ days behind = a real miss
+const STALE_DAYS = 2; // Instagram is nightly: synced today or yesterday = healthy; 2+ days = a real miss.
+
+// TikTok syncs FORTNIGHTLY (see src/app/api/sync/route.ts), so a 2-day yardstick
+// would false-flag it as stale for ~12 of every 14 days. Judge TikTok against its
+// OWN cadence instead: it's only genuinely overdue once it's a grace period past a
+// full cycle. Between scheduled syncs it's on-track, not an error — the response
+// carries a neutral `tiktok_schedule` so the UI can show "next sync in Nd".
+const TIKTOK_SYNC_EVERY_DAYS = Number(process.env.TIKTOK_SYNC_EVERY_DAYS) || 14;
+const TIKTOK_GRACE_DAYS = 2; // allow a late run before calling it a real miss
+const TIKTOK_STALE_DAYS =
+  TIKTOK_SYNC_EVERY_DAYS <= 1 ? STALE_DAYS : TIKTOK_SYNC_EVERY_DAYS + TIKTOK_GRACE_DAYS;
+
+// Is `dateStr` (YYYY-MM-DD) a scheduled TikTok sync day? Mirrors isTikTokSyncDay()
+// in the sync route: runs on business days-of-month 1, 1+N, 1+2N, …
+const isTikTokSyncDay = (dateStr: string) =>
+  TIKTOK_SYNC_EVERY_DAYS <= 1 || Number(dateStr.slice(-2)) % TIKTOK_SYNC_EVERY_DAYS === 1;
 
 export async function GET(req: Request) {
   try {
@@ -67,7 +82,10 @@ export async function GET(req: Request) {
         if (!handle) continue;
         const last = latest.get(`${c.id}|${platform}`);
         const age = daysSince(last);
-        if (age === null || age >= STALE_DAYS) {
+        // Instagram: strict 2-day threshold. TikTok: only flag once it's genuinely
+        // overdue past its fortnightly cadence — on-cadence gaps aren't errors.
+        const threshold = platform === "instagram" ? STALE_DAYS : TIKTOK_STALE_DAYS;
+        if (age === null || age >= threshold) {
           issues.push({
             creator_id: c.id as string,
             creator_name: c.name as string,
@@ -83,7 +101,26 @@ export async function GET(req: Request) {
     // Worst (most stale / never) first.
     issues.sort((a, b) => (b.days_stale ?? 99999) - (a.days_stale ?? 99999));
 
-    return NextResponse.json({ issues, checked_at: today, stale_days: STALE_DAYS });
+    // TikTok cadence status — a neutral "next scheduled sync" the UI shows in place
+    // of a stale warning while TikTok is on-track between fortnightly runs.
+    let lastTikTokSync: string | null = null;
+    latest.forEach((d, k) => {
+      if (k.endsWith("|tiktok") && (!lastTikTokSync || d > lastTikTokSync)) lastTikTokSync = d;
+    });
+    // Days until the next scheduled TikTok day. Count today as due (0) only if it's
+    // a sync day that hasn't run yet; otherwise look forward to the next one.
+    let nextTikTokSyncInDays: number | null = null;
+    const startK = isTikTokSyncDay(today) && lastTikTokSync !== today ? 0 : 1;
+    for (let k = startK; k <= 40; k++) {
+      if (isTikTokSyncDay(addDays(today, k))) { nextTikTokSyncInDays = k; break; }
+    }
+    const tiktok_schedule = {
+      cadence_days: TIKTOK_SYNC_EVERY_DAYS,
+      last_synced: lastTikTokSync,
+      next_sync_in_days: nextTikTokSyncInDays,
+    };
+
+    return NextResponse.json({ issues, tiktok_schedule, checked_at: today, stale_days: STALE_DAYS });
   } catch (e) {
     if (isAuthError(e)) return e.response;
     throw e;
