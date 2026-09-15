@@ -18,7 +18,6 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
     tiktok_username: "",
     base_fee: "",
     rate_per_thousand_views: "2",
-    affiliate_percentage: "0",
     monthly_target: "30",
     joined_at: today,
   });
@@ -40,7 +39,6 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
         tiktok_username: form.tiktok_username.trim().replace("@", "") || null,
         base_fee: parseFloat(form.base_fee) || 0,
         rate_per_thousand_views: parseFloat(form.rate_per_thousand_views) || 2,
-        affiliate_percentage: parseFloat(form.affiliate_percentage) || 0,
         monthly_target: parseInt(form.monthly_target) || 30,
         joined_at: form.joined_at || today,
       }),
@@ -111,13 +109,6 @@ export default function AddCreatorModal({ onClose, onCreated }: Props) {
                 type="number"
               />
             </div>
-            <Field
-              label="Affiliate Commission (%)"
-              value={form.affiliate_percentage}
-              onChange={(v) => setForm({ ...form, affiliate_percentage: v })}
-              placeholder="0"
-              type="number"
-            />
           </div>
 
           {/* Program */}

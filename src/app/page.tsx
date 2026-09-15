@@ -159,9 +159,8 @@ const NAV: NavItem[] = [
 function Sidebar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const router = useRouter();
   const { isSuperAdmin, activeCampaignId, logout, email } = useAuth();
-  // Finance is always available. In "All campaigns" it shows every brand's paid
-  // payouts (with a Brand column); per-brand Wise reconciliation only appears
-  // when a specific campaign is selected (each brand has its own Wise account).
+  // Finance is always available — it's the payout record. In "All campaigns" it
+  // shows every brand's payouts with an extra Brand column; otherwise identical.
   const financeAllowed = true;
 
   return (
@@ -1246,7 +1245,7 @@ function CreatorsTab({
                     <td className="px-4 py-4">
                       <div className="text-gray-300 text-xs font-medium">${creator.base_fee}/mo</div>
                       <div className="text-gray-600 text-xs mt-0.5">
-                        ${creator.rate_per_thousand_views}/1K · {creator.affiliate_percentage ?? 0}% aff
+                        ${creator.rate_per_thousand_views}/1K
                       </div>
                     </td>
 
@@ -1487,26 +1486,8 @@ function PayoutsTab() {
 }
 
 // ─── Finance tab ─────────────────────────────────────────────────────────────
-
-interface WiseBalance {
-  id: number;
-  currency: string;
-  name: string;
-  amount: { value: number; currency: string };
-}
-
-interface WiseData {
-  profile: { id: number; type: string; name: string };
-  balances: WiseBalance[];
-}
-
-interface PayoutWiseMatch {
-  status: "confirmed" | "pending" | "cancelled" | "none";
-  transferId: string | null;
-  amount: number | null;
-  currency: string | null;
-  created: string | null;
-}
+// A record, not a bank. Payments are sent as bonuses in Trybe; this tab is the
+// history of what was paid, for which cycle, and when.
 
 interface PaidCycle {
   id: string;
@@ -1527,31 +1508,11 @@ interface PaidCycle {
     tiktok_username: string | null;
     campaigns?: { name: string } | { name: string }[] | null;
   } | null;
-  wise?: PayoutWiseMatch | null;
-}
-
-interface WiseTransferRow {
-  id: string;
-  type: string;
-  name: string;
-  description: string;
-  amount: number;
-  currency: string;
-  incoming: boolean;
-  status: string;
-  created: string | null;
 }
 
 function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<WiseData | null>(null);
-  const [notConfigured, setNotConfigured] = useState(false);
-  const [connectError, setConnectError] = useState<string | null>(null);
-  const [token, setToken] = useState("");
-  const [connecting, setConnecting] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [paidCycles, setPaidCycles] = useState<PaidCycle[]>([]);
-  const [transactions, setTransactions] = useState<WiseTransferRow[]>([]);
   const [monthFilter, setMonthFilter] = useState("all");
   // Which payout row is expanded to show its base + bonus breakdown.
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -1570,74 +1531,27 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
   const availableMonths = Array.from(new Set(paidCycles.map(payMonthKey).filter(Boolean))).sort().reverse();
   const visibleCycles = monthFilter === "all" ? paidCycles : paidCycles.filter(c => payMonthKey(c) === monthFilter);
 
-  function fetchBalance() {
-    setLoading(true);
-    apiFetch("/api/wise/balance")
-      .then(r => r.json())
-      .then(d => {
-        if (d.error === "not_configured") { setNotConfigured(true); setData(null); }
-        else if (d.error === "wise_auth_failed") { setNotConfigured(true); setConnectError("Token rejected by Wise — please check it and try again."); setData(null); }
-        else if (d.error) { setNotConfigured(true); setConnectError("Could not reach Wise. Check your connection."); setData(null); }
-        else { setData(d); setNotConfigured(false); }
-        setLoading(false);
-      })
-      .catch(() => { setNotConfigured(true); setLoading(false); });
-  }
-
   useEffect(() => {
-    // Always load the cross-brand payout history. Wise (balance + transactions)
-    // is per-brand, so skip it entirely in the All Brands portfolio view.
-    apiFetch("/api/finance/payouts").then(r => r.json()).then(d => setPaidCycles(Array.isArray(d) ? d : []));
-    if (allBrands) { setLoading(false); return; }
-    fetchBalance();
-    apiFetch("/api/wise/transactions")
+    // One source of data now: the payout history. It's campaign-scoped server-side,
+    // so the same request serves both the single-brand and All Brands views.
+    apiFetch("/api/finance/payouts")
       .then(r => r.json())
-      .then(d => setTransactions(Array.isArray(d?.transactions) ? d.transactions : []))
-      .catch(() => setTransactions([]));
+      .then(d => { setPaidCycles(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => { setPaidCycles([]); setLoading(false); });
   }, [allBrands]);
-
-  async function handleConnect() {
-    if (!token.trim()) return;
-    setConnecting(true);
-    setConnectError(null);
-    const res = await apiFetch("/api/wise/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: token.trim() }),
-    });
-    const d = await res.json();
-    if (!res.ok) {
-      setConnectError(
-        d.error === "invalid_token" ? "Invalid token — Wise rejected it. Double-check and try again." :
-        d.error === "wise_unreachable" ? "Could not reach Wise. Check your connection." :
-        "Something went wrong. Try again."
-      );
-      setConnecting(false);
-      return;
-    }
-    setToken("");
-    setConnecting(false);
-    fetchBalance();
-  }
-
-  async function handleDisconnect() {
-    setDisconnecting(true);
-    await apiFetch("/api/wise/settings", { method: "DELETE" });
-    setData(null);
-    setNotConfigured(true);
-    setDisconnecting(false);
-  }
 
   function exportPayoutsCSV() {
     const headers = [
+      ...(allBrands ? ["Brand"] : []),
       "Creator", "Cycle Start", "Cycle End", "Paid Date", "Views Earned",
-      "Base Fee", "View Bonus", "Bonus", "Bonus Note", "Total Paid", "Wise Status",
+      "Base Fee", "View Bonus", "Bonus", "Bonus Note", "Total Paid",
     ];
     const esc = (v: unknown) => {
       const s = String(v ?? "");
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const rows = visibleCycles.map(c => [
+      ...(allBrands ? [brandName(c)] : []),
       c.creators?.name ?? "",
       c.cycle_start_date,
       c.cycle_end_date,
@@ -1648,7 +1562,6 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
       (c.bonus_amount ?? 0).toFixed(2),
       c.bonus_note ?? "",
       c.payout_amount.toFixed(2),
-      c.wise?.status ?? "none",
     ]);
     const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1660,10 +1573,10 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
     URL.revokeObjectURL(url);
   }
 
-  // Cross-brand-aware payout history: every payout paid via the dashboard, with a
-  // click-to-expand breakdown (base fee + view bonus + discretionary bonus). In
-  // All Brands it gains a Brand column and drops the per-brand Wise column.
-  const COLS = 6; // Brand|Creator..Amount (all brands) OR Creator..Amount|Wise — both 6
+  // Payout history: every payout recorded in the dashboard, with a click-to-expand
+  // breakdown (base fee + view bonus + discretionary bonus). All Brands adds a
+  // leading Brand column; otherwise the layout is identical.
+  const COLS = allBrands ? 6 : 5; // [Brand] Creator, Period, Paid, Views, Amount
   function payoutHistorySection() {
     return (
       <div>
@@ -1711,8 +1624,7 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
                   <th className="text-left px-4 py-3 text-xs text-gray-500">Period</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-500">Paid</th>
                   <th className="text-right px-4 py-3 text-xs text-gray-500">Views</th>
-                  <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
-                  {!allBrands && <th className="text-center px-5 py-3 text-xs text-gray-500">Wise</th>}
+                  <th className="text-right px-5 py-3 text-xs text-gray-500">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -1745,14 +1657,9 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
                             : "—"}
                         </td>
                         <td className="px-4 py-3.5 text-right text-gray-400 text-xs tabular-nums">{fmt(c.views_earned)}</td>
-                        <td className="px-4 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
+                        <td className="px-5 py-3.5 text-right font-semibold text-emerald-400 tabular-nums">
                           {fmtMoney(c.payout_amount)}
                         </td>
-                        {!allBrands && (
-                          <td className="px-5 py-3.5 text-center">
-                            <WiseMatchBadge match={c.wise} />
-                          </td>
-                        )}
                       </tr>
                       {open && (
                         <tr className="bg-white/[0.015] border-b border-white/[0.04]">
@@ -1786,14 +1693,13 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
               </tbody>
               <tfoot>
                 <tr className="border-t border-white/[0.07] bg-white/[0.02]">
-                  {/* Amount is the last column in All Brands, else 2nd-last (Wise trails). */}
-                  <td colSpan={allBrands ? COLS - 1 : COLS - 2} className="px-5 py-3 text-xs text-gray-500">
+                  {/* Amount is always the last column now. */}
+                  <td colSpan={COLS - 1} className="px-5 py-3 text-xs text-gray-500">
                     Total paid{monthFilter !== "all" ? ` · ${monthLabel(monthFilter)}` : ""}
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-emerald-400 tabular-nums">
+                  <td className="px-5 py-3 text-right font-bold text-emerald-400 tabular-nums">
                     {fmtMoney(visibleCycles.reduce((s, c) => s + c.payout_amount, 0))}
                   </td>
-                  {!allBrands && <td />}
                 </tr>
               </tfoot>
             </table>
@@ -1803,214 +1709,28 @@ function FinanceTab({ allBrands = false }: { allBrands?: boolean }) {
     );
   }
 
-  // All Brands portfolio view: just the cross-brand payout history (Wise is
-  // per-brand, so its panels only appear when a single campaign is selected).
-  if (allBrands) {
-    return (
-      <div className="p-6 space-y-5">
-        <div>
-          <h2 className="text-sm font-semibold text-white">Finance · All Brands</h2>
-          <p className="text-xs text-gray-600 mt-0.5">Every payout sent via the dashboard. Select a brand for its Wise balance &amp; reconciliation.</p>
-        </div>
-        {loading ? (
-          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
-            Loading payouts…
-          </div>
-        ) : payoutHistorySection()}
-      </div>
-    );
-  }
-
+  // One layout for both scopes. Payments happen in Trybe, so there is no Wise
+  // balance or reconciliation here — just the record of what was paid and when.
+  // All Brands only differs by the extra Brand column inside the table.
   return (
     <div className="p-6 space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-white">Wise Account</h2>
-          <p className="text-xs text-gray-600 mt-0.5">Payment balance &amp; configuration</p>
-        </div>
-        {data && (
-          <button
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-            className="text-xs text-gray-600 hover:text-red-400 transition-colors disabled:opacity-40"
-          >
-            {disconnecting ? "Disconnecting…" : "Disconnect"}
-          </button>
-        )}
+      <div>
+        <h2 className="text-sm font-semibold text-white">
+          Payout History{allBrands ? " · All Brands" : ""}
+        </h2>
+        <p className="text-xs text-gray-600 mt-0.5">
+          Every payout recorded in the dashboard. Payments are sent as bonuses in Trybe.
+        </p>
       </div>
-
       {loading ? (
         <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-10 text-center text-gray-600 text-sm">
-          Connecting to Wise…
+          Loading payouts…
         </div>
-
-      ) : notConfigured ? (
-        /* ── Connect form ── */
-        <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-white/[0.04] rounded-lg flex items-center justify-center shrink-0">
-              <Building2 size={15} className="text-gray-500" />
-            </div>
-            <div>
-              <p className="text-white text-sm font-medium">Connect your Wise account</p>
-              <p className="text-gray-600 text-xs mt-0.5">
-                Get your API token from{" "}
-                <span className="text-gray-400">wise.com → Settings → API tokens</span>
-              </p>
-            </div>
-          </div>
-
-          {connectError && (
-            <p className="text-red-400 text-xs px-1">{connectError}</p>
-          )}
-
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={token}
-              onChange={e => setToken(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleConnect()}
-              placeholder="Paste your Wise API token…"
-              className="flex-1 bg-white/[0.04] border border-white/[0.1] focus:border-emerald-500/40 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
-            />
-            <button
-              onClick={handleConnect}
-              disabled={connecting || !token.trim()}
-              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-semibold px-4 py-2 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)] hover:shadow-[0_0_30px_rgba(52,211,153,0.4)]"
-            >
-              {connecting ? "Connecting…" : "Connect"}
-            </button>
-          </div>
-        </div>
-
-      ) : data ? (
-        <>
-          {/* Account card */}
-          <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-5 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-emerald-500/10 rounded-lg flex items-center justify-center shrink-0">
-                <Building2 size={15} className="text-emerald-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">{data.profile.name}</p>
-                <p className="text-gray-600 text-xs">
-                  {data.profile.type?.toLowerCase() === "business" ? "Business Account" : "Personal Account"} · Wise
-                </p>
-              </div>
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Connected
-              </span>
-            </div>
-          </div>
-
-          {/* Balances — always show, even at $0 */}
-          <div>
-            <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-3">Balances</p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {data.balances.length === 0 ? (
-                /* Account exists but no balance objects returned — show $0 placeholder */
-                <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]">
-                  <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">AUD</p>
-                  <p className="text-white text-2xl font-bold">A$0.00</p>
-                </div>
-              ) : (
-                data.balances.map(b => (
-                  <div
-                    key={b.id}
-                    className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]"
-                  >
-                    <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide mb-2">{b.currency}</p>
-                    <p className="text-white text-2xl font-bold">
-                      {new Intl.NumberFormat("en-AU", {
-                        style: "currency",
-                        currency: b.currency,
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      }).format(b.amount.value)}
-                    </p>
-                    {b.name && <p className="text-gray-700 text-xs mt-1">{b.name}</p>}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Dashboard payout history (click a row for the base + bonus breakdown) */}
-          {payoutHistorySection()}
-
-          {/* Real Wise transactions */}
-          <div>
-            <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-3">Wise Transactions</p>
-            {transactions.length === 0 ? (
-              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-center text-gray-600 text-sm">
-                No Wise transactions found.
-              </div>
-            ) : (
-              <div className="bg-[#0d0d15]/80 backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-white/[0.07]">
-                      <th className="text-left px-5 py-3 text-xs text-gray-500">Recipient</th>
-                      <th className="text-left px-4 py-3 text-xs text-gray-500">Date</th>
-                      <th className="text-right px-4 py-3 text-xs text-gray-500">Amount</th>
-                      <th className="text-center px-5 py-3 text-xs text-gray-500">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transactions.slice(0, 10).map(t => (
-                      <tr key={t.id} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
-                        <td className="px-5 py-3.5">
-                          <p className="text-white font-medium text-sm">{t.name || "—"}</p>
-                          {t.description && <p className="text-gray-600 text-xs mt-0.5 truncate max-w-[220px]">{t.description}</p>}
-                        </td>
-                        <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
-                          {t.created ? new Date(t.created).toLocaleDateString("en-AU", { month: "short", day: "numeric", year: "numeric" }) : "—"}
-                        </td>
-                        <td className={`px-4 py-3.5 text-right tabular-nums ${t.incoming ? "text-emerald-400" : "text-white"}`}>
-                          {t.incoming ? "+" : ""}
-                          {t.currency
-                            ? new Intl.NumberFormat("en-AU", { style: "currency", currency: t.currency }).format(t.amount)
-                            : t.amount}
-                        </td>
-                        <td className="px-5 py-3.5 text-center">
-                          <WiseStatusBadge status={t.status} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </>
-      ) : null}
+      ) : payoutHistorySection()}
     </div>
   );
 }
 
-// ── Reconciliation status pills ──────────────────────────────────────────────
-function WiseMatchBadge({ match }: { match?: PayoutWiseMatch | null }) {
-  if (!match || match.status === "none") {
-    return <span className="text-gray-600 text-xs">⏳ Awaiting</span>;
-  }
-  if (match.status === "confirmed") {
-    return <span className="text-emerald-400 text-xs font-medium">✓ Confirmed</span>;
-  }
-  if (match.status === "cancelled") {
-    return <span className="text-red-400/80 text-xs">✕ Cancelled</span>;
-  }
-  return <span className="text-yellow-400/80 text-xs">• In progress</span>;
-}
-
-function WiseStatusBadge({ status }: { status: string }) {
-  const done = status === "COMPLETED";
-  const cancelled = status === "CANCELLED" || status === "REFUNDED";
-  const label = status.replace(/_/g, " ").toLowerCase();
-  const cls = done ? "text-emerald-400" : cancelled ? "text-red-400/80" : "text-yellow-400/80";
-  return <span className={`${cls} text-xs capitalize`}>{label}</span>;
-}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -2040,12 +1760,12 @@ function DashboardInner() {
   const currentCampaignName =
     campaigns.find((c) => c.id === activeCampaignId)?.name ?? null;
   // "All campaigns" (Owner, no campaign picked) is the portfolio view: only the
-  // macro graph + Manage. Creators/Payouts/Finance all require a specific campaign
-  // (each brand has its own creators, payouts, Wise account). A Manager is always
-  // locked to one campaign, so they always have these.
+  // macro graph + Manage. Creators/Payouts require a specific campaign (each brand
+  // has its own creators and payout cycles). A Manager is always locked to one
+  // campaign, so they always have these.
   const isAllCampaigns = activeCampaignId === null;
   // Finance is available everywhere; in "All campaigns" it lists every brand's
-  // paid payouts and hides the per-brand Wise panels (see FinanceTab).
+  // recorded payouts with a Brand column (see FinanceTab).
   const financeAllowed = true;
   const now = new Date();
 

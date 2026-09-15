@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import {
-  getWiseConfig, fetchWiseProfiles, pickWiseProfile, fetchWiseActivities, matchPayout,
-  type WiseActivity,
-} from "@/lib/wise";
 import { requireAuth, allowedCreatorIds, scopeToCreators, isAuthError } from "@/lib/auth";
 
+// Payout history — every cycle marked paid in the dashboard. Payments themselves
+// happen in Trybe, so there's no bank reconciliation here: this is the record of
+// what was owed, what was paid, and when.
 export async function GET(req: Request) {
   try {
   const ctx = await requireAuth(req);
@@ -42,28 +41,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const cycles = data ?? [];
-
-  // Live reconciliation: pull real Wise transfers and match each payout by
-  // recipient name + amount. Best-effort — if Wise is unreachable we still
-  // return the payouts, just without a match.
-  let activities: WiseActivity[] = [];
-  try {
-    const { token, profileId } = await getWiseConfig(ctx.campaignId);
-    if (token) {
-      const profiles = await fetchWiseProfiles(token);
-      const profile = pickWiseProfile(profiles, profileId);
-      if (profile) activities = await fetchWiseActivities(token, profile.id, 60);
-    }
-  } catch {}
-
-  const enriched = cycles.map((c: any) => {
-    const name = c.creators?.name ?? "";
-    const wise = activities.length ? matchPayout(name, c.payout_amount, activities) : null;
-    return { ...c, wise };
-  });
-
-  return NextResponse.json(enriched);
+  return NextResponse.json(data ?? []);
   } catch (e) {
     if (isAuthError(e)) return e.response;
     throw e;

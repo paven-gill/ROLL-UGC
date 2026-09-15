@@ -2,7 +2,7 @@
 import { apiFetch } from "@/lib/api";
 
 import { useState } from "react";
-import { X, Building2, CheckCircle2, AlertCircle } from "lucide-react";
+import { X, ExternalLink, CheckCircle2, AlertCircle } from "lucide-react";
 
 export interface CycleForPay {
   id: string;
@@ -28,9 +28,10 @@ interface Props {
   onPaid: () => void;
 }
 
-// Interim: payouts are recorded in the dashboard but sent manually in Wise.
-// Opening this in a new tab drops you into Wise's Send money flow.
-const WISE_SEND_URL = "https://wise.com/send";
+// Payments are no longer sent from this dashboard. The retainer + view bonus is
+// paid out as a bonus in Trybe; this modal records the payout here (amount, date,
+// reference) and opens Trybe in a new tab so you can send it there.
+const TRYBE_URL = "https://jointrybe.com/home";
 
 function fmt(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -44,18 +45,17 @@ function fmtDate(s: string) {
   });
 }
 
-type PayResult = {
-  paid: boolean;
-  wise_sent: boolean;
-  wise_error: string | null;
-  wise_transfer_id: string | null;
-};
+type PayResult = { paid: boolean; error: string | null };
 
 export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
+  const today = new Date().toISOString().split("T")[0];
+
   const [bonusAmount, setBonusAmount] = useState("");
-  const [bonusNote, setBonusNote]   = useState("");
-  const [paying, setPaying]         = useState(false);
-  const [result, setResult]         = useState<PayResult | null>(null);
+  const [bonusNote, setBonusNote]     = useState("");
+  const [paidDate, setPaidDate]       = useState(today);
+  const [tribeRef, setTribeRef]       = useState("");
+  const [paying, setPaying]           = useState(false);
+  const [result, setResult]           = useState<PayResult | null>(null);
 
   const bonus = parseFloat(bonusAmount) || 0;
   const total = cycle.base_fee + cycle.view_bonus + bonus;
@@ -81,21 +81,20 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
           view_bonus: cycle.view_bonus,
           bonus_amount: bonus,
           bonus_note: bonusNote,
-          // Interim: don't trigger the (currently blocked) Wise API send —
-          // record only, then open Wise so the user pays manually.
-          recipient_wise_email: null,
+          paid_date: paidDate || today,
+          tribe_reference: tribeRef.trim() || null,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setResult({ paid: false, wise_sent: false, wise_error: data.error ?? "Failed", wise_transfer_id: null });
+        setResult({ paid: false, error: data.error ?? "Failed" });
       } else {
-        setResult({ paid: true, wise_sent: false, wise_error: null, wise_transfer_id: null });
-        // Open Wise in a new tab so they can complete the payment manually.
-        window.open(WISE_SEND_URL, "_blank", "noopener,noreferrer");
+        setResult({ paid: true, error: null });
+        // Open Trybe in a new tab so the bonus can be sent there.
+        window.open(TRYBE_URL, "_blank", "noopener,noreferrer");
       }
     } catch {
-      setResult({ paid: false, wise_sent: false, wise_error: "Network error", wise_transfer_id: null });
+      setResult({ paid: false, error: "Network error" });
     }
     setPaying(false);
   }
@@ -107,7 +106,7 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
           <div>
-            <h2 className="text-white font-semibold text-sm">Pay {cycle.creator_name}</h2>
+            <h2 className="text-white font-semibold text-sm">Record payout · {cycle.creator_name}</h2>
             <p className="text-gray-600 text-xs mt-0.5">
               {fmtDate(cycle.cycle_start_date)} → {fmtDate(cycle.cycle_end_date)}
             </p>
@@ -127,37 +126,41 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
                   <div className="space-y-1">
                     <p className="text-white font-medium text-sm">Payout recorded ✓</p>
                     <p className="text-gray-500 text-xs">
-                      Wise opened in a new tab — finish the payment there.
+                      Trybe opened in a new tab — send the bonus there.
                     </p>
                   </div>
                 </div>
 
-                {/* What to enter in Wise */}
+                {/* What to send in Trybe */}
                 <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 space-y-2">
-                  <p className="text-gray-500 text-[11px] uppercase tracking-wide">Send in Wise</p>
+                  <p className="text-gray-500 text-[11px] uppercase tracking-wide">Send in Trybe</p>
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Recipient</span>
+                    <span className="text-gray-400">Creator</span>
                     <span className="text-white font-medium">{cycle.creator_name}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Amount</span>
+                    <span className="text-gray-400">Bonus amount</span>
                     <span className="text-emerald-400 font-bold tabular-nums">${total.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Marked paid</span>
+                    <span className="text-gray-300 tabular-nums">{fmtDate(paidDate)}</span>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => window.open(WISE_SEND_URL, "_blank", "noopener,noreferrer")}
-                  className="w-full border border-white/[0.12] hover:border-white/[0.25] text-gray-300 hover:text-white px-4 py-2 rounded-lg text-xs transition-all"
+                  onClick={() => window.open(TRYBE_URL, "_blank", "noopener,noreferrer")}
+                  className="w-full flex items-center justify-center gap-1.5 border border-white/[0.12] hover:border-white/[0.25] text-gray-300 hover:text-white px-4 py-2 rounded-lg text-xs transition-all"
                 >
-                  Open Wise again
+                  <ExternalLink size={11} /> Open Trybe again
                 </button>
               </div>
             ) : (
               <div className="flex items-start gap-3">
                 <AlertCircle size={18} className="text-red-400 mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-red-400 font-medium text-sm">Payment failed</p>
-                  <p className="text-gray-500 text-xs mt-1">{result.wise_error}</p>
+                  <p className="text-red-400 font-medium text-sm">Could not record payout</p>
+                  <p className="text-gray-500 text-xs mt-1">{result.error}</p>
                 </div>
               </div>
             )}
@@ -222,12 +225,36 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
               </div>
             </div>
 
+            {/* Payment record — the date it was actually paid in Trybe, plus an
+                optional reference tying this cycle to the Trybe bonus. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-gray-500 text-xs mb-1.5 block">Paid date</label>
+                <input
+                  type="date"
+                  value={paidDate}
+                  onChange={e => setPaidDate(e.target.value)}
+                  className="w-full bg-white/[0.04] border border-white/[0.08] focus:border-emerald-500/40 rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-gray-500 text-xs mb-1.5 block">Trybe reference</label>
+                <input
+                  type="text"
+                  value={tribeRef}
+                  onChange={e => setTribeRef(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full bg-white/[0.04] border border-white/[0.08] focus:border-emerald-500/40 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none transition-colors"
+                />
+              </div>
+            </div>
+
             {/* Manual-pay note */}
             <div className="flex items-start gap-2 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2.5">
-              <Building2 size={12} className="text-gray-500 mt-0.5 shrink-0" />
+              <ExternalLink size={12} className="text-gray-500 mt-0.5 shrink-0" />
               <p className="text-gray-500 text-[11px] leading-relaxed">
-                This records the payout and opens <span className="text-gray-300">Wise</span> in a new tab,
-                where you send the payment manually to <span className="text-gray-300">{cycle.creator_name}</span>.
+                This records the payout here and opens <span className="text-gray-300">Trybe</span> in a new tab,
+                where you send <span className="text-gray-300">{cycle.creator_name}</span> the bonus manually.
               </p>
             </div>
 
@@ -244,7 +271,7 @@ export default function PayCycleModal({ cycle, onClose, onPaid }: Props) {
                 disabled={paying}
                 className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-semibold px-4 py-2.5 rounded-lg text-sm transition-all shadow-[0_0_20px_rgba(52,211,153,0.2)]"
               >
-                {paying ? "Recording…" : `Mark $${total.toFixed(2)} paid & open Wise`}
+                {paying ? "Recording…" : "Open Trybe & mark as paid"}
               </button>
             </div>
           </div>

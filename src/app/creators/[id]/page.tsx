@@ -222,8 +222,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
   const [savingHistoryCycle,     setSavingHistoryCycle]     = useState(false);
 
   const [paymentForm, setPaymentForm] = useState({
-    base_fee: "", rate_per_thousand_views: "", affiliate_percentage: "",
-    wise_email: "", wise_tag: "",
+    base_fee: "", rate_per_thousand_views: "",
   });
   const [socialsForm, setSocialsForm] = useState({ instagram_username: "", tiktok_username: "" });
   const [programForm, setProgramForm] = useState({
@@ -248,9 +247,6 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     setPaymentForm({
       base_fee: String(data.base_fee),
       rate_per_thousand_views: String(data.rate_per_thousand_views),
-      affiliate_percentage: String(data.affiliate_percentage ?? 0),
-      wise_email: data.wise_email ?? "",
-      wise_tag: data.wise_tag ?? "",
     });
     setSocialsForm({ instagram_username: data.instagram_username || "", tiktok_username: data.tiktok_username || "" });
     setProgramForm({
@@ -279,9 +275,6 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
     await patch({
       base_fee: parseFloat(paymentForm.base_fee) || 0,
       rate_per_thousand_views: isNaN(rate) ? 2 : rate,
-      affiliate_percentage: parseFloat(paymentForm.affiliate_percentage) || 0,
-      wise_email: paymentForm.wise_email.trim() || null,
-      wise_tag: paymentForm.wise_tag.trim().replace(/^@/, "") || null,
     });
   }
 
@@ -509,7 +502,7 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-5">
 
         {/* All-time stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <StatCard
             Icon={Eye}       label="All-Time Views"
             value={fmt(allViews)}
@@ -525,11 +518,6 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
             value={`$${totalPaidOut.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             sub="Since joining"
             color="green"
-          />
-          <StatCard
-            Icon={TrendingUp} label="Affiliate Rate"
-            value={`${creator.affiliate_percentage ?? 0}%`}
-            sub="Commission"
           />
         </div>
 
@@ -557,37 +545,11 @@ export default function CreatorPage({ params }: { params: { id: string } }) {
                   onChange={v => setPaymentForm(f => ({ ...f, rate_per_thousand_views: v }))}
                   type="number"
                 />
-                <Field
-                  label="Affiliate Commission (%)"
-                  value={paymentForm.affiliate_percentage}
-                  onChange={v => setPaymentForm(f => ({ ...f, affiliate_percentage: v }))}
-                  type="number"
-                />
-                <div className="pt-1 border-t border-white/[0.06]">
-                  <p className="text-[11px] text-gray-600 uppercase tracking-wider mb-2.5">Wise Details</p>
-                  <div className="space-y-3">
-                    <Field
-                      label="Wise Email"
-                      value={paymentForm.wise_email}
-                      onChange={v => setPaymentForm(f => ({ ...f, wise_email: v }))}
-                      placeholder="creator@email.com"
-                      type="email"
-                    />
-                    <Field
-                      label="Wise Tag"
-                      value={paymentForm.wise_tag}
-                      onChange={v => setPaymentForm(f => ({ ...f, wise_tag: v }))}
-                      placeholder="@username"
-                    />
-                  </div>
-                </div>
               </div>
             ) : (
               <>
-                <InfoRow label="Base Fee"    value={`$${creator.base_fee.toFixed(2)} / month`} />
-                <InfoRow label="View Rate"   value={`$${creator.rate_per_thousand_views} / 1K views`} />
-                <InfoRow label="Affiliate %" value={`${creator.affiliate_percentage ?? 0}%`} />
-                <InfoRow label="Wise"        value={creator.wise_email ?? "—"} />
+                <InfoRow label="Base Fee"  value={`$${creator.base_fee.toFixed(2)} / month`} />
+                <InfoRow label="View Rate" value={`$${creator.rate_per_thousand_views} / 1K views`} />
               </>
             )}
           </SectionCard>

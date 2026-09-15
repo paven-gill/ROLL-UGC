@@ -5,12 +5,15 @@ export interface Creator {
   tiktok_username: string | null;
   base_fee: number;
   rate_per_thousand_views: number;
-  affiliate_percentage: number;
   monthly_target: number;
   active: boolean;
   status: "active" | "paused" | "finished";
   joined_at: string; // "YYYY-MM-DD"
   created_at: string;
+  // Legacy — no longer shown or edited anywhere in the app. Payments moved to
+  // Trybe and the affiliate deal was dropped; the DB columns are kept so the
+  // historical values aren't lost. Safe to remove once the columns are dropped.
+  affiliate_percentage: number;
   wise_email: string | null;
   wise_tag: string | null;
 }

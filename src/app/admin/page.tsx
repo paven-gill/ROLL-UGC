@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Plus, Building2, UserPlus, KeyRound, Wallet, Pencil, Trash2, Check, X } from "lucide-react";
+import { ArrowLeft, Plus, Building2, UserPlus, KeyRound, Pencil, Trash2, Check, X } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { createBrowserAuthClient } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
@@ -392,82 +392,6 @@ function CampaignsSection() {
   );
 }
 
-// ─── Manager: connect/disconnect their brand's Wise account ───────────────────
-function WiseSection() {
-  const [status, setStatus] = useState<"loading" | "connected" | "disconnected">("loading");
-  const [profileName, setProfileName] = useState<string | null>(null);
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const check = useCallback(async () => {
-    const res = await apiFetch("/api/wise/balance");
-    if (res.ok) {
-      const data = await res.json();
-      setProfileName(data?.profile?.name ?? null);
-      setStatus("connected");
-    } else {
-      setStatus("disconnected");
-    }
-  }, []);
-  useEffect(() => { check(); }, [check]);
-
-  async function connect(e: React.FormEvent) {
-    e.preventDefault();
-    if (!token.trim()) return;
-    setBusy(true);
-    setMsg(null);
-    const res = await apiFetch("/api/wise/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: token.trim() }),
-    });
-    setBusy(false);
-    if (!res.ok) return setMsg((await res.json()).error ?? "Could not connect");
-    setToken("");
-    await check();
-  }
-
-  async function disconnect() {
-    setBusy(true);
-    await apiFetch("/api/wise/settings", { method: "DELETE" });
-    setBusy(false);
-    setProfileName(null);
-    setStatus("disconnected");
-  }
-
-  return (
-    <section className={card}>
-      <h2 className="flex items-center gap-2 text-sm font-medium mb-4">
-        <Wallet size={15} className="text-emerald-400" /> Wise connection
-      </h2>
-      {status === "loading" ? (
-        <p className="text-gray-600 text-sm">Checking…</p>
-      ) : status === "connected" ? (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-300">
-            Connected{profileName ? <span className="text-gray-500"> · {profileName}</span> : null}
-          </p>
-          <button onClick={disconnect} disabled={busy} className="text-xs text-red-400 hover:text-red-300">
-            Disconnect
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={connect} className="flex flex-col sm:flex-row gap-2">
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Wise API token"
-            className={inputCls}
-          />
-          <button type="submit" disabled={busy} className={btn}>Connect</button>
-        </form>
-      )}
-      {msg && <p className="text-xs text-gray-400 mt-3">{msg}</p>}
-    </section>
-  );
-}
 
 export default function ManagePage() {
   const router = useRouter();
@@ -493,10 +417,7 @@ export default function ManagePage() {
             <TeamSection isOwner />
           </>
         ) : (
-          <>
-            <TeamSection isOwner={false} />
-            <WiseSection />
-          </>
+          <TeamSection isOwner={false} />
         )}
       </div>
     </div>

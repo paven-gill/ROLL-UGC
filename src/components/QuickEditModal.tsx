@@ -18,7 +18,6 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
     tiktok_username: creator.tiktok_username || "",
     base_fee: String(creator.base_fee),
     rate_per_thousand_views: String(creator.rate_per_thousand_views),
-    affiliate_percentage: String(creator.affiliate_percentage ?? 0),
     monthly_target: String(creator.monthly_target ?? 30),
     joined_at: creator.joined_at || new Date().toISOString().split("T")[0],
   });
@@ -39,7 +38,6 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
         tiktok_username: form.tiktok_username.trim().replace("@", "") || null,
         base_fee: parseFloat(form.base_fee) || 0,
         rate_per_thousand_views: parseFloat(form.rate_per_thousand_views) || 2,
-        affiliate_percentage: parseFloat(form.affiliate_percentage) || 0,
         monthly_target: parseInt(form.monthly_target) || 30,
         joined_at: form.joined_at || creator.joined_at,
       }),
@@ -104,12 +102,6 @@ export default function QuickEditModal({ creator, onClose, onSaved }: Props) {
                 type="number"
               />
             </div>
-            <Field
-              label="Affiliate Commission (%)"
-              value={form.affiliate_percentage}
-              onChange={v => setForm(f => ({ ...f, affiliate_percentage: v }))}
-              type="number"
-            />
           </div>
 
           <div className="space-y-3">

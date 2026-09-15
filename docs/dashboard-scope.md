@@ -2,329 +2,178 @@
 
 ## Purpose
 
-The UGC Creator Dashboard exists to help the business track creator activity, collect post performance data, and calculate creator payouts with enough confidence that monthly payments can be reviewed and paid accurately.
+The dashboard exists to track organic creator content across Instagram and TikTok, and to work out what each creator is owed for a given cycle.
 
-The dashboard is not just a performance dashboard. Its real job is to create a reliable monthly record of:
+Its single most important output is **cost per thousand views (CPM)** — what the business is actually paying for organic reach. Everything else (posts, views, cycles, payout amounts) exists to make that number trustworthy.
 
-- who is in the creator program
-- what their deal terms are
-- what they posted
-- how each post performed
-- what they should be paid for a given month
+The dashboard **does not send money.** Payments are made as bonuses in **Trybe** (jointrybe.com). The dashboard records that a payout happened: the amount, the date, and an optional Trybe reference.
 
 ## Primary Users
 
-The primary user is the business operator managing UGC creators.
+The business operator managing UGC creators, plus per-brand managers.
 
-They need to:
+Two roles:
 
-- add and manage creators
-- sync creator performance data
-- see which creators are active or paused
-- review posts and views
-- compare creators
-- estimate payouts
-- prepare monthly payment decisions
+- **super_admin (owner)** — sees every campaign, can switch between brands or view "All campaigns" as a portfolio. Manages campaigns and users.
+- **brand_admin (manager)** — permanently locked to one campaign. The campaign header is never trusted from the client for this role.
 
-Creators are not currently direct users of the dashboard.
+Creators are not users of the dashboard.
 
-## Current Dashboard Areas
+## Multi-Brand Model
+
+Every creator belongs to a **campaign** (a brand). All data is scoped by campaign via the `x-campaign-id` header, which only a super_admin may set.
+
+"All campaigns" is a portfolio view: Home and Finance work across every brand; Creators and Payouts require a specific campaign to be selected.
+
+## Dashboard Areas
 
 ### Home
 
-The Home view gives a high-level performance overview across creators.
+The daily operating view — "how are creators performing right now?"
 
-Current capabilities:
-
-- view total views
-- view estimated payout totals
-- view cost per thousand views
-- view total posts
-- filter by creator
-- filter by recent ranges such as 7, 14, or 30 days
-- view specific months
-- see views over time
-- see top posts by creator
-
-This area is best understood as the daily operating view. It answers, "How are creators performing right now?"
+- total views, total payouts, CPM, total posts
+- Instagram-only / TikTok-only platform filters
+- a toggle to fold base retainers into the payout total (combined view only — retainers aren't tied to a platform)
+- creator filter and range picker (7 / 14 / 30 days, a specific month, or all time)
+- Views Over Time chart, with a dot marking each completed cycle
+- top posts (top 8 for a single creator, top 4 per creator across the roster)
+- a tracking-health badge flagging creators whose view tracking has silently frozen
+- a self-healing catch-up that re-runs the nightly sync if it was missed
 
 ### Creators
 
-The Creators view is the roster and management area.
+The roster — "who is in the program, what is their deal, are they active?"
 
-Current capabilities:
-
-- list all creators
-- add a creator
-- view creator status
-- view creator deal terms
-- sort creators by posts, views, payout, join date, or status
-- quick-edit creator details
-- manually sync an individual creator
-- open a creator detail page
-
-This area answers, "Who is in the program, what is their deal, and are they active?"
+- list, search, and sort creators; toggle between active and paused/finished
+- deal terms shown as base fee per month and rate per 1,000 views
+- add a creator, quick-edit, manually sync one creator, open their detail page
 
 ### Creator Detail
 
-The creator detail page is the individual record for one creator.
+The full record for one creator.
 
-Current capabilities:
-
-- view creator profile information
-- edit payment terms
-- edit social handles
-- edit program details
-- pause, reactivate, or delete a creator
-- sync the creator
-- review all-time stats
-- review monthly history
-- review posts synced for that creator
-
-This area answers, "What is the full record for this creator?"
+- all-time views, all-time posts, total paid out
+- edit payment terms (base fee, rate per 1K), social handles, and program details (name, monthly post target, join date)
+- pause, reactivate, finish, or delete
+- cycle history, with editable cycle dates
+- every synced post, with the ability to exclude posts from counting
 
 ### Payouts
 
-The Payouts view estimates what creators should be paid.
+Cycle-by-cycle amounts owed, filtered to cycles ending in a chosen month.
 
-Current capabilities:
+- creator, cycle period, posts vs target, views earned, base fee, view bonus, total
+- status: In Progress, Pending, or Paid
+- a **Pay** button on a finished cycle opens the record-payout modal
 
-- choose a time range
-- view Instagram views
-- view TikTok views
-- view total views
-- view CPM
-- view base fee
-- view view bonus
-- view total estimated payout
-- sort payout rows
-- view grand totals
+### Finance
 
-This area answers, "What should I expect to pay creators for this period?"
+The payout record — every cycle marked paid, and when.
+
+- creator, cycle period, paid date, views, amount
+- click any row for the base fee / view bonus / discretionary bonus breakdown
+- month filter, totals row, CSV export
+- in "All campaigns", an extra Brand column; otherwise the layout is identical
+
+There is no bank integration and no balance. Money moves in Trybe.
 
 ## Data Model
 
 ### Creators
 
-Creators are the people in the UGC program.
+name, Instagram username, TikTok username, base monthly fee, rate per 1,000 views, monthly post target, joined date, status (active / paused / finished), campaign.
 
-Important fields:
-
-- name
-- Instagram username
-- TikTok username
-- base monthly fee
-- rate per 1,000 views
-- affiliate percentage
-- monthly target
-- joined date
-- active status
+`affiliate_percentage`, `wise_email`, and `wise_tag` still exist as columns but are **legacy** — unused by the app, kept so historical values aren't lost.
 
 ### Post Snapshots
 
-Post snapshots are the evidence of individual content.
-
-They should represent:
-
-- creator
-- platform
-- post ID
-- media type
-- post date
-- views used for calculations
-- source field used for views
-- likes
-- comments
-- thumbnail
-- sync time
-
-These records help prove what content existed and how it performed at the time of sync.
+Per-post evidence: creator, platform, post ID, media type, post date, views used, which field the views came from, likes, comments, thumbnail, sync time.
 
 ### View Snapshots
 
-View snapshots are daily platform-level records.
+Daily platform-level cumulative records: creator, platform, snapshot date, cumulative views, **capped** cumulative views (the payable basis), recent post count, follower count, sync time.
 
-They should represent:
+Note: Supabase caps reads at 1,000 rows by default. This table grows roughly one row per creator per platform per day, so any query against it must bound by date and page — otherwise it silently drops the newest rows.
 
-- creator
-- platform
-- snapshot date
-- cumulative views
-- recent post count
-- follower count
-- sync time
+### Creator Cycles / Payout Cycles
 
-These records help calculate performance changes over time.
+- `creator_cycles` — exactly one row per creator: the cycle currently running, with its view baselines.
+- `payout_cycles` — the permanent, stamped history. One row per completed cycle, with the frozen numbers, status (`pending` / `paid`), `paid_at`, any discretionary bonus and note, and `tribe_reference`.
 
-### Monthly Metrics
-
-Monthly metrics summarize creator performance by creator, platform, year, and month.
-
-They currently represent:
-
-- total views
-- post count
-- follower count
-- sync time
-
-Important note: the current code updates monthly metrics from a rolling 30-day calculation. For true payroll accuracy, monthly payout records should eventually use calendar-month snapshots and be locked after review.
+Once a cycle is stamped it is never recomputed. That's what makes the payment record durable.
 
 ## Data Collection
 
-The dashboard currently collects data through sync routes.
+- **Instagram** — RapidAPI (Looter2), synced nightly.
+- **TikTok** — RapidAPI (tikwm / tiktok-scraper7), synced **fortnightly by default** (`TIKTOK_SYNC_EVERY_DAYS=14`). This cadence is deliberate: the free tier allows only 300 requests per month, and daily syncing blows through it in days, after which every call fails and TikTok silently records zero views.
 
-Instagram data is collected through RapidAPI.
+The sync process: find the creator → scrape their connected platforms → store a daily view snapshot → store or refresh post snapshots → update monthly metrics → run cycle rollover.
 
-TikTok data is collected through Apify.
+Syncing happens through the nightly cron for all active creators, or manually for one creator.
 
-The sync process:
+## Cycle And Payout Logic
 
-1. Finds the creator.
-2. Scrapes their connected platforms.
-3. Stores a daily view snapshot.
-4. Stores or refreshes post snapshots.
-5. Updates monthly metrics.
-6. Returns sync results to the dashboard.
+Cycles are **rolling 30 days per creator**, anchored to their join date — not calendar months.
 
-Syncing can happen:
+After every sync, cycle rollover runs:
 
-- manually for one creator
-- through the daily cron sync route for all active creators
+- no cycle yet → onboard, creating the first cycle from the join date
+- cycle still running → report progress, change nothing
+- cycle term over → stamp the finished cycle as a `pending` payout and immediately open the next cycle from a fresh baseline
 
-## Payout Logic
+Paused and finished creators are skipped entirely: no new cycles, no payout estimates. Their already-stamped payout history is never touched.
 
-The dashboard currently estimates creator payout using:
+The payout is:
 
 ```text
-payout = base fee + ((total views / 1,000) * rate per thousand views)
+payout = base fee + (payable views / 1,000 * rate per 1,000 views)
 ```
 
-For shorter ranges like 7, 14, or 30 days, the dashboard uses view differences from snapshots.
+Two caps limit **payable** views. Neither ever reduces displayed view counts — true totals are always shown in full.
 
-For selected months, the dashboard uses stored monthly metrics.
+1. **Per video** — a single video contributes at most 1,000,000 views toward payout.
+2. **Per cycle, per campaign** — `campaigns.monthly_view_cap` is a hard ceiling on combined payable views in one cycle. Roll is capped at 1,000,000; other campaigns are uncapped by default.
 
-For all-time totals, the dashboard groups monthly metrics to avoid double-counting base fees across platforms.
+## Payment Flow
 
-## What The Dashboard Should Be Trusted For Today
+1. A cycle ends and is stamped `pending`.
+2. On the Payouts tab, click **Pay**.
+3. The modal shows the base fee, view bonus, and an optional discretionary bonus, plus the total.
+4. Set the **paid date** (defaults to today) and optionally a **Trybe reference**.
+5. Click **Open Trybe & mark as paid** — the payout is recorded here and Trybe opens in a new tab.
+6. Send the bonus in Trybe for the amount shown.
 
-The dashboard can currently be trusted as an operational view for:
+The dashboard is the record of what was owed and paid. Trybe is where the money actually moves.
 
-- tracking creators
-- syncing social data
-- seeing recent performance
-- reviewing posts
-- estimating monthly payout amounts
-- identifying top creators and top posts
+## What The Dashboard Can Be Trusted For
 
-## What Needs To Become Stronger Before Payroll Is Fully Reliable
+- tracking creators and their deal terms
+- syncing Instagram and TikTok performance
+- CPM and cost-per-view analysis across any range
+- reviewing posts and excluding ones that shouldn't count
+- calculating what a creator is owed for a completed cycle
+- a permanent record of what was paid and when
 
-The dashboard should not rely only on live or rolling numbers for final payment decisions.
+## Known Gaps
 
-To make monthly payments reliable, the app should add a formal monthly payout workflow:
+- `monthly_metrics` is an analytics cache derived from calendar-month snapshot deltas. Payouts do **not** use it — they use cycle baselines — but the two won't always agree, because cycles aren't calendar months.
+- There's no audit trail of edits. Changing a cycle's dates or excluding a post changes the numbers with no record of who did it or when.
+- Several `view_snapshots` queries are still unbounded (the all-time chart, the creators list, per-creator cycles). They sort newest-first so they currently return fresh data, but they should be paged as the table grows.
 
-- generate payout statements for a specific calendar month
-- freeze the numbers used for payment
-- allow manual adjustments
-- allow notes
-- track review status
-- track approval status
-- track paid status
-- preserve historical payout records even if a post changes later
+## Possible Future Scope
 
-## Recommended Future Scope
+- export a per-creator payout statement, not just the payouts CSV
+- an approval step between `pending` and `paid`
+- an audit trail for manual adjustments
+- review tooling for edge cases: creator missed their post target, joined or paused mid-cycle, a platform failed to sync, a post was deleted, a suspicious view spike
 
-### Monthly Payout Statements
-
-Add a table and screen for locked monthly payout records.
-
-A payout statement should include:
-
-- creator
-- month
-- year
-- Instagram views
-- TikTok views
-- total views
-- eligible post count
-- base fee
-- view bonus
-- affiliate amount
-- manual adjustment
-- final payout
-- notes
-- status
-
-Suggested statuses:
-
-- Draft
-- Needs Review
-- Approved
-- Paid
-
-### Calendar-Month Accuracy
-
-Move final payout logic from rolling 30-day windows to true calendar-month windows.
-
-Example:
-
-```text
-January payout = posts and views from January 1 to January 31
-```
-
-This is different from:
-
-```text
-last 30 days from today
-```
-
-### Audit Trail
-
-Add an audit trail so it is clear:
-
-- when data was synced
-- what numbers changed
-- who approved a payout
-- when a payout was marked paid
-- whether any manual adjustment was made
-
-### Exceptions And Manual Review
-
-Add review tools for cases like:
-
-- creator did not meet posting target
-- creator joined mid-month
-- creator paused mid-month
-- platform data failed to sync
-- post was deleted
-- suspicious spike or missing views
-- manual bonus or deduction
-
-### Exporting
-
-Add export options for bookkeeping.
-
-Useful exports:
-
-- monthly payout CSV
-- creator-level payout statement
-- post evidence report
-
-## Out Of Scope For Now
-
-The dashboard does not currently need to be:
+## Out Of Scope
 
 - a creator-facing portal
-- an invoice generation system
-- a bank payment system
-- a full CRM
-- a content approval tool
-- a contract signing platform
-
-Those could be added later, but the current product should stay focused on data collection, performance tracking, and payout confidence.
+- invoice generation
+- sending payments (this now lives in Trybe)
+- a full CRM, content approval, or contract signing
 
 ## Product North Star
 
-The north star is simple:
-
-At the end of every month, the business should be able to open the dashboard, review each creator, understand exactly why they are owed a certain amount, approve the payout, and keep a permanent record of that decision.
-
+At the end of every cycle, the business should be able to open the dashboard, see exactly why a creator is owed a certain amount, pay it in Trybe, record it here, and know what that reach cost per thousand views.
