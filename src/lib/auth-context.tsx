@@ -29,6 +29,13 @@ interface AuthState extends Me {
   /** Active campaign id; null = "all campaigns" (super_admin only). */
   activeCampaignId: string | null;
   setActiveCampaign: (id: string | null) => void;
+  /**
+   * Re-read the campaign list from the server. Call after adding, renaming, or
+   * deleting a campaign on the Manage page — otherwise the campaign picker keeps
+   * showing the list as it was when the app first loaded (a deleted brand stays
+   * selectable, a new one is missing) until a full page reload.
+   */
+  refreshCampaigns: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -80,6 +87,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // Pull a fresh campaign list. If the campaign currently being viewed no longer
+  // exists (you just deleted the brand you were looking at), drop back to "All
+  // campaigns" and clear the saved selection so it can't be restored later.
+  const refreshCampaigns = useCallback(async () => {
+    const res = await fetch("/api/me");
+    if (!res.ok) return;
+    const data: Me | null = await res.json();
+    if (!data) return;
+    setMe(data);
+    setActiveCampaignIdState((current) => {
+      if (current && !data.campaigns.some((c) => c.id === current)) {
+        if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
+        return null;
+      }
+      return current;
+    });
+  }, []);
+
   const logout = useCallback(async () => {
     await createBrowserAuthClient().auth.signOut();
     if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
@@ -103,7 +128,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ ...me, activeCampaignId, setActiveCampaign, logout }}
+      value={{ ...me, activeCampaignId, setActiveCampaign, refreshCampaigns, logout }}
     >
       {children}
     </Ctx.Provider>

@@ -345,15 +345,20 @@ function CampaignRow({ campaign, onChanged }: { campaign: Campaign; onChanged: (
 
 // ─── Owner: create campaigns ──────────────────────────────────────────────────
 function CampaignsSection() {
+  const { refreshCampaigns } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Refresh this section's list AND the app-wide campaign picker. Without the
+  // second call the picker keeps offering a brand that's already been deleted
+  // (and hides a newly created one) until the page is fully reloaded.
   const load = useCallback(async () => {
     const c = await apiFetch("/api/admin/campaigns").then((r) => (r.ok ? r.json() : []));
     setCampaigns(Array.isArray(c) ? c : []);
-  }, []);
+    await refreshCampaigns();
+  }, [refreshCampaigns]);
   useEffect(() => { load(); }, [load]);
 
   async function add(e: React.FormEvent) {
