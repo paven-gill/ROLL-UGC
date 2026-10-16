@@ -59,6 +59,42 @@ export async function storeSnapshot(
     .filter(p => !excludedIdsForViews.has(p.post_id))
     .reduce((s, p) => s + Math.min(p.view_count_used, PER_VIDEO_VIEW_CAP), 0);
 
+  // ── Collapse guard ──────────────────────────────────────────────────────────
+  // A healthy scrape never loses most of a creator's views overnight. When a pull
+  // comes back with a cumulative that has collapsed far below the last known good
+  // snapshot, it's almost always a PARTIAL/FAILED scrape (missed posts, broken
+  // pagination, a rate-limit) — not a real drop. Storing it would overwrite the
+  // good number and corrupt the dashboard, because totals and the chart are rebuilt
+  // from each snapshot (this is exactly what flapped Aris's IG between ~9.3M and
+  // ~40k every other day, and what silently dropped Vanessa's IG earlier).
+  //
+  // So reject it: keep the last good snapshot and skip the post_snapshots rebuild.
+  // If the drop is REAL (e.g. a mass deletion), the creator simply stops updating
+  // and tracking-health will flag it stale within a couple of days for a human to
+  // confirm — far safer than silently corrupting the data. Tunable via env.
+  const COLLAPSE_FLOOR = Number(process.env.SYNC_COLLAPSE_FLOOR) || 0.5; // reject if new < 50% of last good
+  const MIN_PREV_TO_GUARD = 10_000; // don't guard tiny creators — early growth is spiky
+  const { data: lastSnap } = await db
+    .from("view_snapshots")
+    .select("cumulative_views, snapshot_date")
+    .eq("creator_id", creatorId)
+    .eq("platform", platform)
+    .lt("snapshot_date", today)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (
+    lastSnap &&
+    lastSnap.cumulative_views >= MIN_PREV_TO_GUARD &&
+    adjustedCumulativeViews < lastSnap.cumulative_views * COLLAPSE_FLOOR
+  ) {
+    console.warn(
+      `[sync] COLLAPSE GUARD: ${creatorId}/${platform} scraped ${adjustedCumulativeViews} vs last good ${lastSnap.cumulative_views} (${lastSnap.snapshot_date}) — rejecting as a partial scrape; keeping last good snapshot.`
+    );
+    return { skipped: "collapse_guard", scraped: adjustedCumulativeViews, last_good: lastSnap.cumulative_views };
+  }
+
   await db.from("view_snapshots").upsert(
     {
       creator_id: creatorId,
