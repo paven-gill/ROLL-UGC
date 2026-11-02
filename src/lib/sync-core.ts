@@ -72,7 +72,13 @@ export async function storeSnapshot(
   // If the drop is REAL (e.g. a mass deletion), the creator simply stops updating
   // and tracking-health will flag it stale within a couple of days for a human to
   // confirm — far safer than silently corrupting the data. Tunable via env.
-  const COLLAPSE_FLOOR = Number(process.env.SYNC_COLLAPSE_FLOOR) || 0.5; // reject if new < 50% of last good
+  //
+  // Threshold: cumulative views are near-monotonic (they only climb), so ANY drop
+  // beyond a few percent is suspect. The first cut at 50% was too lax — Aris's IG
+  // flapped again with "milder" partials (e.g. 9.59M → 7.84M, an 18% drop, which
+  // sailed under a 50% floor and then recovered as a fake +1.77M spike). A 15% floor
+  // sits in the dead zone between normal scrape noise (<~3%) and a partial pull.
+  const COLLAPSE_FLOOR = Number(process.env.SYNC_COLLAPSE_FLOOR) || 0.85; // reject if new < 85% of last good (>15% drop)
   const MIN_PREV_TO_GUARD = 10_000; // don't guard tiny creators — early growth is spiky
   const { data: lastSnap } = await db
     .from("view_snapshots")
